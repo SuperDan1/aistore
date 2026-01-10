@@ -1,5 +1,8 @@
 //! Aistore 主程序入口
 
+// 全局类型定义
+mod types;
+
 // 导入各个模块
 mod buffer;
 mod heap;
