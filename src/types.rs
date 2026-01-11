@@ -1,9 +1,14 @@
 //! 全局类型定义
 //! 
 //! 存放存储引擎全局需要用到的结构体定义、常量和类型别名
+/// 块 ID 类型
+pub type BlockId = u64;
 
-/// 数据块大小 (4KB)
-pub const BLOCK_SIZE: usize = 4096;
+/// 无效块 ID
+pub const INVALID_BLOCK_ID: BlockId = u64::MAX;
+
+/// 数据块大小 (8KB)
+pub const BLOCK_SIZE: usize = 8192;
 
 /// 页大小 (与块大小相同)
 pub const PAGE_SIZE: usize = BLOCK_SIZE;
@@ -68,8 +73,7 @@ impl From<std::io::Error> for AistoreError {
 /// 存储引擎结果类型
 pub type AistoreResult<T> = Result<T, AistoreError>;
 
-/// 块 ID 类型
-pub type BlockId = u64;
+
 
 /// 页 ID 类型
 pub type PageId = u64;
