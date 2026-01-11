@@ -1,5 +1,9 @@
 //! Aistore main program entry
 
+// Use jemalloc as global allocator
+#[global_allocator]
+static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 // Global type definitions
 mod types;
 
