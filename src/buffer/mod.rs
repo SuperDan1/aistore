@@ -5,8 +5,9 @@ pub struct BufferTag {
 }
 
 /// BufferDesc struct, used to describe buffer properties
-#[cfg_attr(any(target_arch = "x86", target_arch = "x86_64"), repr(align(64)))]
-#[cfg_attr(any(target_arch = "arm", target_arch = "aarch64"), repr(align(128)))]
+/// Aligned to cacheline size defined in types.rs
+#[cfg_attr(any(target_arch = "x86", target_arch = "x86_64"), repr(align(64)))] // Match CACHELINE_SIZE in types.rs
+#[cfg_attr(any(target_arch = "arm", target_arch = "aarch64"), repr(align(128)))] // Match CACHELINE_SIZE in types.rs
 pub struct BufferDesc {
     /// Buffer tag
     pub buf_tag: BufferTag,
