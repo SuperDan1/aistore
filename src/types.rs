@@ -19,6 +19,13 @@ pub const SEGMENT_SIZE: usize = 64 * 1024 * 1024;
 /// Index entry size
 pub const INDEX_ENTRY_SIZE: usize = 16;
 
+/// Cache line size - varies by architecture
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+pub const CACHELINE_SIZE: usize = 64;
+
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+pub const CACHELINE_SIZE: usize = 128;
+
 /// Storage engine error type
 #[derive(Debug)]
 pub enum AistoreError {
