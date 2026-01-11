@@ -1,9 +1,9 @@
-//! Aistore 主程序入口
+//! Aistore main program entry
 
-// 全局类型定义
+// Global type definitions
 mod types;
 
-// 导入各个模块
+// Import various modules
 mod buffer;
 mod heap;
 mod index;
@@ -14,7 +14,7 @@ mod lock;
 mod infrastructure;
 
 fn main() {
-    println!("Aistore 存储引擎启动中...");
-    println!("已加载模块: buffer, heap, index, tablespace, segment, controlfile, lock, infrastructure");
-    println!("Aistore 存储引擎启动完成！");
+    println!("Aistore storage engine starting...");
+    println!("Loaded modules: buffer, heap, index, tablespace, segment, controlfile, lock, infrastructure");
+    println!("Aistore storage engine startup completed!");
 }

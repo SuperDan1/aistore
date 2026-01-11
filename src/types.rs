@@ -1,42 +1,42 @@
-//! 全局类型定义
+//! Global type definitions
 //! 
-//! 存放存储引擎全局需要用到的结构体定义、常量和类型别名
-/// 块 ID 类型
+//! Stores struct definitions, constants, and type aliases used globally by the storage engine
+/// Block ID type
 pub type BlockId = u64;
 
-/// 无效块 ID
+/// Invalid block ID
 pub const INVALID_BLOCK_ID: BlockId = u64::MAX;
 
-/// 数据块大小 (8KB)
+/// Data block size (8KB)
 pub const BLOCK_SIZE: usize = 8192;
 
-/// 页大小 (与块大小相同)
+/// Page size (same as block size)
 pub const PAGE_SIZE: usize = BLOCK_SIZE;
 
-/// 段大小 (64MB)
+/// Segment size (64MB)
 pub const SEGMENT_SIZE: usize = 64 * 1024 * 1024;
 
-/// 索引项大小
+/// Index entry size
 pub const INDEX_ENTRY_SIZE: usize = 16;
 
-/// 存储引擎错误类型
+/// Storage engine error type
 #[derive(Debug)]
 pub enum AistoreError {
-    /// I/O 操作错误
+    /// I/O operation error
     IoError(std::io::Error),
-    /// 内存分配错误
+    /// Memory allocation error
     AllocError,
-    /// 索引错误
+    /// Index error
     IndexError(String),
-    /// 数据格式错误
+    /// Data format error
     DataFormatError(String),
-    /// 锁错误
+    /// Lock error
     LockError(String),
-    /// 未找到错误
+    /// Not found error
     NotFound,
-    /// 权限错误
+    /// Permission error
     PermissionError,
-    /// 其他错误
+    /// Other error
     Other(String),
 }
 
@@ -70,98 +70,98 @@ impl From<std::io::Error> for AistoreError {
     }
 }
 
-/// 存储引擎结果类型
+/// Storage engine result type
 pub type AistoreResult<T> = Result<T, AistoreError>;
 
 
 
-/// 页 ID 类型
+/// Page ID type
 pub type PageId = u64;
 
-/// 段 ID 类型
+/// Segment ID type
 pub type SegmentId = u64;
 
-/// 表空间 ID 类型
+/// Tablespace ID type
 pub type TablespaceId = u32;
 
-/// 索引 ID 类型
+/// Index ID type
 pub type IndexId = u32;
 
-/// 偏移量类型
+/// Offset type
 pub type Offset = u64;
 
-/// 长度类型
+/// Length type
 pub type Length = u64;
 
-/// 时间戳类型
+/// Timestamp type
 pub type Timestamp = u64;
 
-/// 数据块头部
+/// Data block header
 #[derive(Debug, Clone, Copy)]
 pub struct BlockHeader {
-    /// 块 ID
+    /// Block ID
     pub block_id: BlockId,
-    /// 块类型
+    /// Block type
     pub block_type: BlockType,
-    /// 数据长度
+    /// Data length
     pub data_len: Length,
-    /// 校验和
+    /// Checksum
     pub checksum: u32,
-    /// 时间戳
+    /// Timestamp
     pub timestamp: Timestamp,
 }
 
-/// 块类型
+/// Block type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockType {
-    /// 数据块
+    /// Data block
     Data,
-    /// 索引块
+    /// Index block
     Index,
-    /// 元数据块
+    /// Metadata block
     Metadata,
-    /// 空闲块
+    /// Free block
     Free,
 }
 
-/// 页头部
+/// Page header
 #[derive(Debug, Clone, Copy)]
 pub struct PageHeader {
-    /// 页 ID
+    /// Page ID
     pub page_id: PageId,
-    /// 页类型
+    /// Page type
     pub page_type: PageType,
-    /// 数据长度
+    /// Data length
     pub data_len: Length,
-    /// 空闲空间
+    /// Free space
     pub free_space: Length,
-    /// 时间戳
+    /// Timestamp
     pub timestamp: Timestamp,
 }
 
-/// 页类型
+/// Page type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageType {
-    /// 数据页
+    /// Data page
     Data,
-    /// 索引页
+    /// Index page
     Index,
-    /// 目录页
+    /// Directory page
     Directory,
-    /// 空闲页
+    /// Free page
     Free,
 }
 
-/// 存储引擎配置
+/// Storage engine configuration
 #[derive(Debug, Clone)]
 pub struct AistoreConfig {
-    /// 数据目录路径
+    /// Data directory path
     pub data_dir: String,
-    /// 缓冲区大小 (以块为单位)
+    /// Buffer size (in blocks)
     pub buffer_size: usize,
-    /// 是否启用日志
+    /// Whether to enable logging
     pub enable_log: bool,
-    /// 日志级别
+    /// Log level
     pub log_level: LogLevel,
 }
 
@@ -169,58 +169,58 @@ impl Default for AistoreConfig {
     fn default() -> Self {
         Self {
             data_dir: String::from("./data"),
-            buffer_size: 1024, // 1024 个块，约 4MB
+            buffer_size: 1024, // 1024 blocks, approximately 4MB
             enable_log: true,
             log_level: LogLevel::Info,
         }
     }
 }
 
-/// 日志级别
+/// Log level
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {
-    /// 调试级别
+    /// Debug level
     Debug,
-    /// 信息级别
+    /// Info level
     Info,
-    /// 警告级别
+    /// Warn level
     Warn,
-    /// 错误级别
+    /// Error level
     Error,
 }
 
-/// 键值对
+/// Key-value pair
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyValue {
-    /// 键
+    /// Key
     pub key: Vec<u8>,
-    /// 值
+    /// Value
     pub value: Vec<u8>,
 }
 
-/// 事务状态
+/// Transaction status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransactionStatus {
-    /// 活跃
+    /// Active
     Active,
-    /// 已提交
+    /// Committed
     Committed,
-    /// 已回滚
+    /// RolledBack
     RolledBack,
 }
 
-/// 事务 ID 类型
+/// Transaction ID type
 pub type TransactionId = u64;
 
-/// 事务信息
+/// Transaction information
 #[derive(Debug, Clone)]
 pub struct TransactionInfo {
-    /// 事务 ID
+    /// Transaction ID
     pub txn_id: TransactionId,
-    /// 事务状态
+    /// Transaction status
     pub status: TransactionStatus,
-    /// 开始时间
+    /// Start time
     pub start_time: Timestamp,
-    /// 结束时间
+    /// End time
     pub end_time: Option<Timestamp>,
 }
