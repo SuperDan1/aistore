@@ -65,4 +65,22 @@ impl BufferMgr {
             buffers: buffers_ptr,
         }
     }
+    
+    /// Lookup a BufferDesc by BufferTag
+    /// Returns a pointer to the BufferDesc if found, otherwise returns null pointer
+    pub fn lookup(&self, tag: &BufferTag) -> *mut BufferDesc {
+        unsafe {
+            for i in 0..self.buffer_size {
+                let buffer_ptr = self.buffers.add(i);
+                let current_tag = &(*buffer_ptr).buf_tag;
+                
+                if current_tag.file_id == tag.file_id && current_tag.block_id == tag.block_id {
+                    return buffer_ptr;
+                }
+            }
+        }
+        
+        // Return null pointer if not found
+        std::ptr::null_mut()
+    }
 }
