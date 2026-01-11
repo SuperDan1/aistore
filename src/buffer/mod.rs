@@ -5,6 +5,7 @@ pub struct BufferTag {
 }
 
 /// BufferDesc struct, used to describe buffer properties
+#[repr(align(64))] // Cache line alignment (64 bytes)
 pub struct BufferDesc {
     /// Buffer tag
     pub buf_tag: BufferTag,
