@@ -1,64 +1,64 @@
 # Aistore
 
-构建高性能、高弹性、高可用的存储引擎
+Building a high-performance, high-resilience, high-availability storage engine
 
-## 项目概述
+## Project Overview
 
-Aistore 是一个用 Rust 语言开发的现代化存储引擎，旨在提供：
+Aistore is a modern storage engine developed in Rust, designed to provide:
 
-- **高性能**：利用 Rust 的内存安全特性和零成本抽象，实现极致的性能表现
-- **高弹性**：具备自动故障检测、恢复和数据冗余能力
-- **高可用**：支持分布式部署，确保服务的持续可用性
+- **High Performance**: Leveraging Rust's memory safety features and zero-cost abstractions for maximum performance
+- **High Resilience**: Automatic failure detection, recovery, and data redundancy capabilities
+- **High Availability**: Support for distributed deployment to ensure continuous service availability
 
-## 核心特性
+## Core Features
 
-- 键值存储接口
-- 事务支持
-- 数据持久化
-- 水平扩展能力
-- 监控和管理界面
+- Key-value storage interface
+- Transaction support
+- Data persistence
+- Horizontal scaling capability
+- Monitoring and management interface
 
-## 技术栈
+## Technology Stack
 
-- **语言**：Rust
-- **构建工具**：Cargo
-- **版本控制**：Git
+- **Language**: Rust
+- **Build Tool**: Cargo
+- **Version Control**: Git
 
-## 开始使用
+## Getting Started
 
-### 构建项目
+### Build the Project
 
 ```bash
 cargo build --release
 ```
 
-### 运行项目
+### Run the Project
 
 ```bash
 cargo run --release
 ```
 
-### 运行测试
+### Run Tests
 
 ```bash
 cargo test
 ```
 
-## 项目结构
+## Project Structure
 
 ```
 aistore/
-├── src/                # 源代码目录
-│   └── main.rs        # 主程序入口
-├── Cargo.toml         # Cargo 配置文件
-├── README.md          # 项目说明文档
-└── .gitignore         # Git 忽略文件
+├── src/                # Source code directory
+│   └── main.rs        # Main program entry
+├── Cargo.toml         # Cargo configuration file
+├── README.md          # Project documentation
+└── .gitignore         # Git ignore file
 ```
 
-## 贡献
+## Contributing
 
-欢迎贡献代码！请查看 CONTRIBUTING.md 文件了解贡献指南。
+Contributions are welcome! Please check the CONTRIBUTING.md file for contribution guidelines.
 
-## 许可证
+## License
 
-本项目采用 MIT 许可证，详情请见 LICENSE 文件。
+This project is licensed under the MIT License. See the LICENSE file for details.
