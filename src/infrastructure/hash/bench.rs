@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use rand::Rng;
 
 use crate::buffer::BufferTag;
-use crate::infrastructure::hash::{fnv1a_hash, djb2_hash, murmur3_hash};
+use crate::infrastructure::hash::{fnv1a_hash, djb2_hash, murmur3_hash, xxh64_hash};
 
 /// Generate a specified number of random BufferTag instances
 fn generate_random_buffer_tags(count: usize) -> Vec<BufferTag> {
@@ -105,6 +105,13 @@ pub fn run_hash_benchmark() {
     });
     println!("MurmurHash3 hash: {} ms", time_murmur3);
     
+    // Test XXH64 hash function
+    let time_xxh64 = measure_hash_performance(&tags, |tag| {
+        let s = format!("{}-{}", tag.file_id, tag.block_id);
+        xxh64_hash(&s)
+    });
+    println!("XXH64 hash: {} ms", time_xxh64);
+    
     println!("\nHash Distribution Analysis ({} buckets):", BUCKET_COUNT);
     println!("----------------------------------------");
     
@@ -145,6 +152,16 @@ pub fn run_hash_benchmark() {
         BUCKET_COUNT
     );
     
+    // Test XXH64 hash function
+    let (avg_xxh64, max_xxh64, collisions_xxh64) = calculate_hash_distribution(
+        |tag| {
+            let s = format!("{}-{}", tag.file_id, tag.block_id);
+            xxh64_hash(&s)
+        },
+        &tags,
+        BUCKET_COUNT
+    );
+    
     // Print distribution results
     let ideal_avg = TAG_COUNT as f64 / BUCKET_COUNT as f64;
     
@@ -179,6 +196,14 @@ pub fn run_hash_benchmark() {
   Collision rate: {:.2}%", 
         avg_murmur3, ideal_avg, max_murmur3, collisions_murmur3, 
         (collisions_murmur3 as f64 / TAG_COUNT as f64) * 100.0);
+    
+    println!("\nXXH64 hash:");
+    println!("  Average bucket size: {:.2} (ideal: {:.2})
+  Maximum bucket size: {}
+  Collisions: {}
+  Collision rate: {:.2}%", 
+        avg_xxh64, ideal_avg, max_xxh64, collisions_xxh64, 
+        (collisions_xxh64 as f64 / TAG_COUNT as f64) * 100.0);
     
     println!("\n=========================");
     println!("Benchmark completed successfully!");
