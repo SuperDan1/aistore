@@ -135,6 +135,149 @@ pub fn murmur3_hash(s: &str) -> u64 {
     hash
 }
 
+/// XXH64 hash implementation for strings
+/// Returns a 64-bit integer hash value
+pub fn xxh64_hash(s: &str) -> u64 {
+    // XXH64 constants
+    const PRIME64_1: u64 = 0x9E3779B185EBCA87;
+    const PRIME64_2: u64 = 0xC2B2AE3D27D4EB4F;
+    const PRIME64_3: u64 = 0x165667B19E3779F9;
+    const PRIME64_4: u64 = 0x85EBCA77C2B2AE63;
+    const PRIME64_5: u64 = 0x27D4EB2F165667C5;
+    const SEED: u64 = 0; // Default seed
+
+    let data = s.as_bytes();
+    let len = data.len() as u64;
+    let mut h64 = if len >= 32 {
+        let mut v1 = SEED.wrapping_add(PRIME64_1).wrapping_add(PRIME64_2);
+        let mut v2 = SEED.wrapping_add(PRIME64_2);
+        let mut v3 = SEED;
+        let mut v4 = SEED.wrapping_sub(PRIME64_1);
+
+        let mut i = 0;
+        while i + 32 <= data.len() {
+            // Process 32 bytes (4x8 bytes)
+            let block = &data[i..i+32];
+            
+            // Update v1
+            let mut k1 = u64::from_le_bytes([block[0], block[1], block[2], block[3], block[4], block[5], block[6], block[7]]);
+            k1 = k1.wrapping_mul(PRIME64_2);
+            k1 = k1.rotate_left(31);
+            k1 = k1.wrapping_mul(PRIME64_1);
+            v1 ^= k1;
+            v1 = v1.rotate_left(27);
+            v1 = v1.wrapping_mul(PRIME64_1).wrapping_add(PRIME64_4);
+
+            // Update v2
+            let mut k2 = u64::from_le_bytes([block[8], block[9], block[10], block[11], block[12], block[13], block[14], block[15]]);
+            k2 = k2.wrapping_mul(PRIME64_2);
+            k2 = k2.rotate_left(31);
+            k2 = k2.wrapping_mul(PRIME64_1);
+            v2 ^= k2;
+            v2 = v2.rotate_left(27);
+            v2 = v2.wrapping_mul(PRIME64_1).wrapping_add(PRIME64_4);
+
+            // Update v3
+            let mut k3 = u64::from_le_bytes([block[16], block[17], block[18], block[19], block[20], block[21], block[22], block[23]]);
+            k3 = k3.wrapping_mul(PRIME64_2);
+            k3 = k3.rotate_left(31);
+            k3 = k3.wrapping_mul(PRIME64_1);
+            v3 ^= k3;
+            v3 = v3.rotate_left(27);
+            v3 = v3.wrapping_mul(PRIME64_1).wrapping_add(PRIME64_4);
+
+            // Update v4
+            let mut k4 = u64::from_le_bytes([block[24], block[25], block[26], block[27], block[28], block[29], block[30], block[31]]);
+            k4 = k4.wrapping_mul(PRIME64_2);
+            k4 = k4.rotate_left(31);
+            k4 = k4.wrapping_mul(PRIME64_1);
+            v4 ^= k4;
+            v4 = v4.rotate_left(27);
+            v4 = v4.wrapping_mul(PRIME64_1).wrapping_add(PRIME64_4);
+
+            i += 32;
+        }
+
+        // Merge all values
+        let mut h64 = v1.rotate_left(1).wrapping_add(v2.rotate_left(7)).wrapping_add(v3.rotate_left(12)).wrapping_add(v4.rotate_left(18));
+
+        // Mix v1
+        v1 = v1.wrapping_mul(PRIME64_2);
+        v1 = v1.rotate_left(31);
+        v1 = v1.wrapping_mul(PRIME64_1);
+        h64 ^= v1;
+        h64 = h64.wrapping_mul(PRIME64_1).wrapping_add(PRIME64_4);
+
+        // Mix v2
+        v2 = v2.wrapping_mul(PRIME64_2);
+        v2 = v2.rotate_left(31);
+        v2 = v2.wrapping_mul(PRIME64_1);
+        h64 ^= v2;
+        h64 = h64.wrapping_mul(PRIME64_1).wrapping_add(PRIME64_4);
+
+        // Mix v3
+        v3 = v3.wrapping_mul(PRIME64_2);
+        v3 = v3.rotate_left(31);
+        v3 = v3.wrapping_mul(PRIME64_1);
+        h64 ^= v3;
+        h64 = h64.wrapping_mul(PRIME64_1).wrapping_add(PRIME64_4);
+
+        // Mix v4
+        v4 = v4.wrapping_mul(PRIME64_2);
+        v4 = v4.rotate_left(31);
+        v4 = v4.wrapping_mul(PRIME64_1);
+        h64 ^= v4;
+        h64 = h64.wrapping_mul(PRIME64_1).wrapping_add(PRIME64_4);
+
+        h64
+    } else {
+        SEED.wrapping_add(PRIME64_5)
+    };
+
+    // Add length
+    h64 ^= len;
+
+    // Process remaining bytes
+    let mut i = if len >= 32 { len as usize } else { 0 };
+    while i + 8 <= data.len() {
+        let mut k1 = u64::from_le_bytes([data[i], data[i+1], data[i+2], data[i+3], data[i+4], data[i+5], data[i+6], data[i+7]]);
+        k1 = k1.wrapping_mul(PRIME64_2);
+        k1 = k1.rotate_left(31);
+        k1 = k1.wrapping_mul(PRIME64_1);
+        h64 ^= k1;
+        h64 = h64.rotate_left(27);
+        h64 = h64.wrapping_mul(PRIME64_1).wrapping_add(PRIME64_4);
+        i += 8;
+    }
+
+    if i + 4 <= data.len() {
+        let k1 = u32::from_le_bytes([data[i], data[i+1], data[i+2], data[i+3]]) as u64;
+        k1.wrapping_mul(PRIME64_1);
+        h64 ^= k1;
+        h64 = h64.rotate_left(23);
+        h64 = h64.wrapping_mul(PRIME64_2).wrapping_add(PRIME64_3);
+        i += 4;
+    }
+
+    while i < data.len() {
+        let k1 = data[i] as u64;
+        k1.wrapping_mul(PRIME64_5);
+        h64 ^= k1;
+        h64 = h64.rotate_left(11);
+        h64 = h64.wrapping_mul(PRIME64_1);
+        i += 1;
+    }
+
+    // Final mix
+    h64 ^= h64.wrapping_shr(33);
+    h64 = h64.wrapping_mul(0xFF51AFD7ED558CCD);
+    h64 ^= h64.wrapping_shr(33);
+    h64 = h64.wrapping_mul(0xC4CEB9FE1A85EC53);
+    h64 ^= h64.wrapping_shr(33);
+
+    h64
+}
+
 /// Hash a string and return an integer
 /// Uses FNV-1a as the default hash algorithm
 pub fn hash_string(s: &str) -> u64 {
