@@ -65,8 +65,8 @@ where
 
 /// Run the hash algorithm benchmark
 pub fn run_hash_benchmark() {
-    const TAG_COUNT: usize = 10000;
-    const BUCKET_COUNT: usize = 1000;
+    const TAG_COUNT: usize = 1000000;
+    const BUCKET_COUNT: usize = 1000000;
     
     println!("\nHash Algorithm Benchmark");
     println!("=========================");
