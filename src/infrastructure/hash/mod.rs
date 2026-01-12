@@ -83,21 +83,19 @@ pub fn murmur3_hash(s: &str) -> u64 {
     }
 
     // Process remaining bytes
-    let mut remaining = data.len() - i;
-    if remaining > 0 {
-        let mut k1 = 0u64;
-        let mut k2 = 0u64;
+        let mut remaining = data.len() - i;
+        if remaining > 0 {
+            let mut k1 = 0u64;
+            let mut k2 = 0u64;
 
-        match remaining {
-            15 => k2 ^= (data[i + 14] as u64) << 48,
-            14 => k2 ^= (data[i + 13] as u64) << 40,
-            13 => k2 ^= (data[i + 12] as u64) << 32,
-            12 => k2 ^= (data[i + 11] as u64) << 24,
-            11 => k2 ^= (data[i + 10] as u64) << 16,
-            10 => k2 ^= (data[i + 9] as u64) << 8,
-            9 => k2 ^= data[i + 8] as u64,
-            _ => {}
-        }
+            // Process k2 (bytes 8-15 if present)
+            if remaining > 8 {
+                // Set all bytes in k2 for remaining bytes > 8
+                for j in 8..remaining {
+                    let byte_pos = (j - 8) * 8;
+                    k2 ^= (data[i + j] as u64) << byte_pos;
+                }
+            }
 
         if remaining > 8 {
             k2 = k2.wrapping_mul(C2);
