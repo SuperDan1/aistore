@@ -165,4 +165,12 @@ impl BufferMgr {
             *head_ptr = new_entry_ptr;
         }
     }
+    
+    /// Read a buffer by BufferTag
+    /// First step: look up the corresponding BufferDesc from the hash table
+    pub fn read(&self, tag: BufferTag) -> *mut BufferDesc {
+        // Step 1: Look up the corresponding BufferDesc from the hash table
+        let buffer_ptr = self.lookup(&tag);
+        buffer_ptr
+    }
 }
