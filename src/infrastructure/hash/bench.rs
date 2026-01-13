@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use rand::Rng;
 
 use crate::buffer::BufferTag;
-use crate::infrastructure::hash::{fnv1a_hash, djb2_hash, murmur3_hash, xxh64_hash};
+use crate::infrastructure::hash::{fnv1a_hash, murmur3_hash, xxh64_hash, cityhash_64_hash, crc32_hash};
 
 /// Generate a specified number of random BufferTag instances
 fn generate_random_buffer_tags(count: usize) -> Vec<BufferTag> {
@@ -91,12 +91,7 @@ pub fn run_hash_benchmark() {
     });
     println!("FNV-1a hash: {} ms", time_fnv1a);
     
-    // Test djb2 hash function
-    let time_djb2 = measure_hash_performance(&tags, |tag| {
-        let s = format!("{}-{}", tag.file_id, tag.block_id);
-        djb2_hash(&s)
-    });
-    println!("djb2 hash: {} ms", time_djb2);
+
     
     // Test MurmurHash3 hash function
     let time_murmur3 = measure_hash_performance(&tags, |tag| {
@@ -111,6 +106,20 @@ pub fn run_hash_benchmark() {
         xxh64_hash(&s)
     });
     println!("XXH64 hash: {} ms", time_xxh64);
+
+    // Test CityHash64 hash function
+    let time_cityhash = measure_hash_performance(&tags, |tag| {
+        let s = format!("{}-{}", tag.file_id, tag.block_id);
+        cityhash_64_hash(&s)
+    });
+    println!("CityHash64 hash: {} ms", time_cityhash);
+
+    // Test CRC32 hash function
+    let time_crc32 = measure_hash_performance(&tags, |tag| {
+        let s = format!("{}-{}", tag.file_id, tag.block_id);
+        crc32_hash(&s)
+    });
+    println!("CRC32 hash: {} ms", time_crc32);
     
     println!("\nHash Distribution Analysis ({} buckets):", BUCKET_COUNT);
     println!("----------------------------------------");
@@ -132,15 +141,7 @@ pub fn run_hash_benchmark() {
         BUCKET_COUNT
     );
     
-    // Test djb2 hash function
-    let (avg_djb2, max_djb2, collisions_djb2) = calculate_hash_distribution(
-        |tag| {
-            let s = format!("{}-{}", tag.file_id, tag.block_id);
-            djb2_hash(&s)
-        },
-        &tags,
-        BUCKET_COUNT
-    );
+
     
     // Test MurmurHash3 hash function
     let (avg_murmur3, max_murmur3, collisions_murmur3) = calculate_hash_distribution(
@@ -157,6 +158,26 @@ pub fn run_hash_benchmark() {
         |tag| {
             let s = format!("{}-{}", tag.file_id, tag.block_id);
             xxh64_hash(&s)
+        },
+        &tags,
+        BUCKET_COUNT
+    );
+
+    // Test CityHash64 hash function
+    let (avg_cityhash, max_cityhash, collisions_cityhash) = calculate_hash_distribution(
+        |tag| {
+            let s = format!("{}-{}", tag.file_id, tag.block_id);
+            cityhash_64_hash(&s)
+        },
+        &tags,
+        BUCKET_COUNT
+    );
+
+    // Test CRC32 hash function
+    let (avg_crc32, max_crc32, collisions_crc32) = calculate_hash_distribution(
+        |tag| {
+            let s = format!("{}-{}", tag.file_id, tag.block_id);
+            crc32_hash(&s)
         },
         &tags,
         BUCKET_COUNT
@@ -181,13 +202,7 @@ pub fn run_hash_benchmark() {
         avg_fnv1a, ideal_avg, max_fnv1a, collisions_fnv1a, 
         (collisions_fnv1a as f64 / TAG_COUNT as f64) * 100.0);
     
-    println!("\ndjb2 hash:");
-    println!("  Average bucket size: {:.2} (ideal: {:.2})
-  Maximum bucket size: {}
-  Collisions: {}
-  Collision rate: {:.2}%", 
-        avg_djb2, ideal_avg, max_djb2, collisions_djb2, 
-        (collisions_djb2 as f64 / TAG_COUNT as f64) * 100.0);
+
     
     println!("\nMurmurHash3 hash:");
     println!("  Average bucket size: {:.2} (ideal: {:.2})
@@ -204,6 +219,22 @@ pub fn run_hash_benchmark() {
   Collision rate: {:.2}%", 
         avg_xxh64, ideal_avg, max_xxh64, collisions_xxh64, 
         (collisions_xxh64 as f64 / TAG_COUNT as f64) * 100.0);
+
+    println!("\nCityHash64 hash:");
+    println!("  Average bucket size: {:.2} (ideal: {:.2})
+  Maximum bucket size: {}
+  Collisions: {}
+  Collision rate: {:.2}%", 
+        avg_cityhash, ideal_avg, max_cityhash, collisions_cityhash, 
+        (collisions_cityhash as f64 / TAG_COUNT as f64) * 100.0);
+
+    println!("\nCRC32 hash:");
+    println!("  Average bucket size: {:.2} (ideal: {:.2})
+  Maximum bucket size: {}
+  Collisions: {}
+  Collision rate: {:.2}%", 
+        avg_crc32, ideal_avg, max_crc32, collisions_crc32, 
+        (collisions_crc32 as f64 / TAG_COUNT as f64) * 100.0);
     
     println!("\n=========================");
     println!("Benchmark completed successfully!");
