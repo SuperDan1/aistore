@@ -1,7 +1,7 @@
 // Hash functions for strings
 
 use xxhash_rust::xxh64;
-use crc32fast;
+use crc_fast;
 
 /// Benchmark module for hash algorithm performance comparison
 pub mod bench;
@@ -31,9 +31,9 @@ pub fn cityhash_64_hash(s: &str) -> u64 {
 }
 
 /// CRC32 implementation for strings
-/// Returns a 64-bit integer hash value using the crc32fast library
+/// Returns a 64-bit integer hash value using the crc-fast library
 pub fn crc32_hash(s: &str) -> u64 {
-    crc32fast::hash(s.as_bytes()) as u64
+    crc_fast::crc32_iso_hdlc(s.as_bytes()) as u64
 }
 
 /// Hash a string and return an integer
