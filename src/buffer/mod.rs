@@ -15,7 +15,7 @@ impl BufferTag {
 }
 
 /// Hash table entry for the buffer hash table
-pub struct HashEntry {
+struct HashEntry {
     /// Buffer tag
     pub tag: BufferTag,
     /// Pointer to the corresponding BufferDesc
@@ -26,7 +26,7 @@ pub struct HashEntry {
 
 impl HashEntry {
     /// Create a new HashEntry
-    pub fn new(tag: BufferTag, buffer_ptr: *mut BufferDesc) -> Self {
+    fn new(tag: BufferTag, buffer_ptr: *mut BufferDesc) -> Self {
         HashEntry {
             tag,
             buffer_ptr,
@@ -51,7 +51,7 @@ pub struct BufferDesc {
 
 impl BufferDesc {
     /// Initialize a new BufferDesc
-    pub fn new() -> Self {
+    fn new() -> Self {
         BufferDesc {
             buf_tag: BufferTag { file_id: 0, block_id: 0 },
             state: std::sync::atomic::AtomicU64::new(0),
@@ -64,12 +64,12 @@ impl BufferDesc {
 /// Buffer manager struct
 pub struct BufferMgr {
     /// Buffer pool size
-    pub buffer_size: usize,
+    buffer_size: usize,
     /// Pointer to an array of BufferDesc structures
-    pub buffers: *mut BufferDesc,
+    buffers: *mut BufferDesc,
     /// Buffer hash table, size is buffer_size
     /// Each entry is a pointer to a linked list of HashEntry
-    pub buf_hash_table: *mut *mut HashEntry,
+    buf_hash_table: *mut *mut HashEntry,
 }
 
 use std::alloc;
@@ -120,7 +120,7 @@ impl BufferMgr {
     
     /// Lookup a BufferDesc by BufferTag
     /// Returns a pointer to the BufferDesc if found, otherwise returns null pointer
-    pub fn lookup(&self, tag: &BufferTag) -> *mut BufferDesc {
+    fn lookup(&self, tag: &BufferTag) -> *mut BufferDesc {
         unsafe {
             // Calculate hash value and index
             let hash = tag.hash();
@@ -144,7 +144,7 @@ impl BufferMgr {
     }
     
     /// Insert a BufferDesc pointer into the hash table
-    pub fn insert_hash_entry(&self, tag: BufferTag, buffer_ptr: *mut BufferDesc) {
+    fn insert_hash_entry(&self, tag: BufferTag, buffer_ptr: *mut BufferDesc) {
         unsafe {
             // Calculate hash value and index
             let hash = tag.hash();
