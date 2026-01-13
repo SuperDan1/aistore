@@ -1,10 +1,11 @@
 
+/// LRU implementation with hot, cold, and candidate list
+pub mod lru;
+
 pub struct BufferTag {
     pub file_id: u16,
     pub block_id: u32
 }
-
-
 
 /// Hash table entry for the buffer hash table
 struct HashEntry {
