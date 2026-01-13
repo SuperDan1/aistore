@@ -4,15 +4,7 @@ pub struct BufferTag {
     pub block_id: u32
 }
 
-impl BufferTag {
-    /// Hash function for BufferTag
-    pub fn hash(&self) -> u64 {
-        // Simple hash function combining file_id and block_id
-        let mut hash = self.file_id as u64;
-        hash = (hash << 32) | self.block_id as u64;
-        hash
-    }
-}
+
 
 /// Hash table entry for the buffer hash table
 struct HashEntry {
@@ -73,6 +65,7 @@ pub struct BufferMgr {
 }
 
 use std::alloc;
+use crate::infrastructure::hash::fnv1a_hash;
 
 impl BufferMgr {
     /// Initialize a new BufferMgr with the specified buffer size
@@ -123,7 +116,8 @@ impl BufferMgr {
     fn lookup(&self, tag: &BufferTag) -> *mut BufferDesc {
         unsafe {
             // Calculate hash value and index
-            let hash = tag.hash();
+            let s = format!("{}-{}", tag.file_id, tag.block_id);
+            let hash = fnv1a_hash(&s);
             let index = (hash as usize) % self.buffer_size;
             
             // Get the head of the linked list at the calculated index
@@ -147,7 +141,8 @@ impl BufferMgr {
     fn insert_hash_entry(&self, tag: BufferTag, buffer_ptr: *mut BufferDesc) {
         unsafe {
             // Calculate hash value and index
-            let hash = tag.hash();
+            let s = format!("{}-{}", tag.file_id, tag.block_id);
+            let hash = fnv1a_hash(&s);
             let index = (hash as usize) % self.buffer_size;
             
             // Allocate memory for a new hash entry
