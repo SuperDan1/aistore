@@ -5,15 +5,15 @@ use std::ptr;
 use std::alloc;
 
 /// Hash table node structure
-pub struct HashNode<K, V> {
-    pub key: K,
-    pub value: V,
-    pub next: *mut HashNode<K, V>,
+struct HashNode<K, V> {
+    key: K,
+    value: V,
+    next: *mut HashNode<K, V>,
 }
 
 impl<K, V> HashNode<K, V> {
     /// Create a new hash node
-    pub fn new(key: K, value: V) -> Self {
+    fn new(key: K, value: V) -> Self {
         HashNode {
             key,
             value,
