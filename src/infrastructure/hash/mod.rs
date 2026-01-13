@@ -36,6 +36,8 @@ pub fn crc32_hash(s: &str) -> u64 {
     crc_fast::crc32_iso_hdlc(s.as_bytes()) as u64
 }
 
+
+
 /// Hash a string and return an integer
 /// Uses FNV-1a as the default hash algorithm
 pub fn hash_string(s: &str) -> u64 {
