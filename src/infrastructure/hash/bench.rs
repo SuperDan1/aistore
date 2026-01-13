@@ -6,7 +6,6 @@ use rand::Rng;
 
 use crate::buffer::BufferTag;
 use crate::infrastructure::hash::{fnv1a_hash, murmur3_hash, xxh64_hash, cityhash_64_hash, crc32_hash};
-use crc_fast;
 
 /// Generate a specified number of random BufferTag instances
 fn generate_random_buffer_tags(count: usize) -> Vec<BufferTag> {
@@ -66,8 +65,8 @@ where
 
 /// Run the hash algorithm benchmark
 pub fn run_hash_benchmark() {
-    const TAG_COUNT: usize = 1000000;
-    const BUCKET_COUNT: usize = 1000000;
+    const TAG_COUNT: usize = 10000000;
+    const BUCKET_COUNT: usize = 10000000;
     
     println!("\nHash Algorithm Benchmark");
     println!("=========================");
@@ -121,6 +120,8 @@ pub fn run_hash_benchmark() {
         crc32_hash(&s)
     });
     println!("CRC32 hash: {} ms", time_crc32);
+    
+
 
 
     
@@ -186,6 +187,8 @@ pub fn run_hash_benchmark() {
         BUCKET_COUNT
     );
     
+
+    
     // Print distribution results
     let ideal_avg = TAG_COUNT as f64 / BUCKET_COUNT as f64;
     
@@ -238,6 +241,8 @@ pub fn run_hash_benchmark() {
   Collision rate: {:.2}%", 
         avg_crc32, ideal_avg, max_crc32, collisions_crc32, 
         (collisions_crc32 as f64 / TAG_COUNT as f64) * 100.0);
+    
+
     
     println!("\n=========================");
     println!("Benchmark completed successfully!");

@@ -61,16 +61,16 @@ Contributions are welcome! Please check the CONTRIBUTING.md file for contributio
 
 ## Performance Benchmarks
 
-The following are the performance results of various hash algorithms implemented in Aistore (measured in milliseconds for 1,000,000 operations):
+The following are the performance results of various hash algorithms implemented in Aistore (measured in milliseconds for 10,000,000 operations):
 
 | Algorithm | Time (ms) |
 |-----------|-----------|
 | BufferTag's hash | 0 |
-| FNV-1a | 53 |
-| MurmurHash3 | 57 |
-| XXH64 | 56 |
-| CityHash64 | 52 |
-| CRC32 | 60 |
+| FNV-1a | 518 |
+| MurmurHash3 | 574 |
+| XXH64 | 564 |
+| CityHash64 | 528 |
+| CRC32 | 597 |
 
 ## License
 
