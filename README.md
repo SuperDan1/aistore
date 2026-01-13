@@ -59,6 +59,19 @@ aistore/
 
 Contributions are welcome! Please check the CONTRIBUTING.md file for contribution guidelines.
 
+## Performance Benchmarks
+
+The following are the performance results of various hash algorithms implemented in Aistore (measured in milliseconds for 1,000,000 operations):
+
+| Algorithm | Time (ms) |
+|-----------|-----------|
+| BufferTag's hash | 0 |
+| FNV-1a | 53 |
+| MurmurHash3 | 57 |
+| XXH64 | 56 |
+| CityHash64 | 52 |
+| CRC32 | 60 |
+
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for details.

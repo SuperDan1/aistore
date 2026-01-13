@@ -6,6 +6,7 @@ use rand::Rng;
 
 use crate::buffer::BufferTag;
 use crate::infrastructure::hash::{fnv1a_hash, murmur3_hash, xxh64_hash, cityhash_64_hash, crc32_hash};
+use crc_fast;
 
 /// Generate a specified number of random BufferTag instances
 fn generate_random_buffer_tags(count: usize) -> Vec<BufferTag> {
@@ -120,6 +121,8 @@ pub fn run_hash_benchmark() {
         crc32_hash(&s)
     });
     println!("CRC32 hash: {} ms", time_crc32);
+
+
     
     println!("\nHash Distribution Analysis ({} buckets):", BUCKET_COUNT);
     println!("----------------------------------------");
