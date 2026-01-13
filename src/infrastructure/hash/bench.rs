@@ -80,9 +80,12 @@ pub fn run_hash_benchmark() {
     println!("Performance Test Results (time in ms):");
     println!("----------------------------------------");
     
-    // Test BufferTag's built-in hash function
-    let time_builtin = measure_hash_performance(&tags, |tag| tag.hash());
-    println!("BufferTag's hash: {} ms", time_builtin);
+    // Test BufferTag's hash using FNV-1a
+    let time_builtin = measure_hash_performance(&tags, |tag| {
+        let s = format!("{}-{}", tag.file_id, tag.block_id);
+        fnv1a_hash(&s)
+    });
+    println!("BufferTag's hash (FNV-1a): {} ms", time_builtin);
     
     // Test FNV-1a hash function
     let time_fnv1a = measure_hash_performance(&tags, |tag| {
@@ -128,9 +131,12 @@ pub fn run_hash_benchmark() {
     println!("\nHash Distribution Analysis ({} buckets):", BUCKET_COUNT);
     println!("----------------------------------------");
     
-    // Test BufferTag's built-in hash function
+    // Test BufferTag's hash using FNV-1a
     let (avg_builtin, max_builtin, collisions_builtin) = calculate_hash_distribution(
-        |tag| tag.hash(),
+        |tag| {
+            let s = format!("{}-{}", tag.file_id, tag.block_id);
+            fnv1a_hash(&s)
+        },
         &tags,
         BUCKET_COUNT
     );
@@ -192,7 +198,7 @@ pub fn run_hash_benchmark() {
     // Print distribution results
     let ideal_avg = TAG_COUNT as f64 / BUCKET_COUNT as f64;
     
-    println!("BufferTag's hash:");
+    println!("BufferTag's hash (FNV-1a):");
     println!("  Average bucket size: {:.2} (ideal: {:.2})
   Maximum bucket size: {}
   Collisions: {}
