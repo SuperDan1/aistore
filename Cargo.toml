@@ -11,5 +11,22 @@ xxhash-rust = { version = "0.8.12", features = ["xxh64"] }
 simplehash = "0.1.3"
 crc32fast = "1.5.0"
 crc-fast = "1.10.0"
+parking_lot = "0.12.3"
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+# Criterion bench configuration
+[[bench]]
+name = "lwlock_bench"
+harness = false
+path = "src/infrastructure/lwlock/bench.rs"
+
+[[bench]]
+name = "hash_bench"
+harness = false
+path = "src/infrastructure/hash/bench.rs"
+
+
 
 

@@ -21,8 +21,5 @@ fn main() {
     println!("Aistore storage engine starting...");
     println!("Loaded modules: buffer, heap, index, tablespace, segment, controlfile, lock, infrastructure");
     
-    // Run hash algorithm benchmark
-    infrastructure::hash::bench::run_hash_benchmark();
-    
     println!("\nAistore storage engine startup completed!");
 }

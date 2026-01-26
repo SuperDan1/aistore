@@ -3,9 +3,6 @@
 use xxhash_rust::xxh64;
 use crc_fast;
 
-/// Benchmark module for hash algorithm performance comparison
-pub mod bench;
-
 /// FNV-1a hash implementation for strings
 /// Returns a 64-bit integer hash value using the simplehash library
 pub fn fnv1a_hash(s: &str) -> u64 {
