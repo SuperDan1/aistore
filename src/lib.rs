@@ -12,3 +12,4 @@ pub mod segment;
 pub mod controlfile;
 pub mod lock;
 pub mod infrastructure;
+pub mod vfs;
