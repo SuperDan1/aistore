@@ -2,18 +2,32 @@
 
 use std::collections::LinkedList;
 
+/// Node type indicating which list the node belongs to
+#[derive(Clone, PartialEq, Debug)]
+pub enum NodeType {
+    /// Node is in the hot list
+    Hot,
+    /// Node is in the cold list
+    Cold,
+    /// Node is in the free list
+    Free,
+}
+
 /// LRU node structure for the linked list
 #[derive(Clone)]
 pub struct Node<T> {
     /// The actual data stored in the node
     pub data: T,
+    /// The type of the node, indicating which list it belongs to
+    pub node_type: NodeType,
 }
 
 impl<T> Node<T> {
-    /// Create a new LRU node
-    pub fn new(data: T) -> Self {
+    /// Create a new LRU node with the specified type
+    pub fn new(data: T, node_type: NodeType) -> Self {
         Node {
             data,
+            node_type,
         }
     }
 }
@@ -24,14 +38,14 @@ pub struct LruManager<T> {
     pub hot_list: LinkedList<Node<T>>,
     /// Cold list: infrequently accessed items
     pub cold_list: LinkedList<Node<T>>,
-    /// Candidate list: items transitioning between hot and cold
-    pub candidate_list: LinkedList<Node<T>>,
+    /// Free list: items that can be evicted
+    pub free_list: LinkedList<Node<T>>,
     /// Maximum capacity for the hot list
     pub hot_capacity: usize,
     /// Maximum capacity for the cold list
     pub cold_capacity: usize,
-    /// Maximum capacity for the candidate list
-    pub candidate_capacity: usize,
+    /// Maximum capacity for the free list
+    pub free_capacity: usize,
 }
 
 impl<T> LruManager<T>
@@ -39,33 +53,35 @@ where
     T: Clone + PartialEq,
 {
     /// Create a new LRU manager with the specified capacities
-    pub fn new(hot_capacity: usize, cold_capacity: usize, candidate_capacity: usize) -> Self {
+    pub fn new(hot_capacity: usize, cold_capacity: usize, free_capacity: usize) -> Self {
         LruManager {
             hot_list: LinkedList::new(),
             cold_list: LinkedList::new(),
-            candidate_list: LinkedList::new(),
+            free_list: LinkedList::new(),
             hot_capacity,
             cold_capacity,
-            candidate_capacity,
+            free_capacity,
         }
     }
 
     /// Add an item to the LRU manager
     pub fn add(&mut self, data: T) {
         // By default, add to the cold list first
-        self.cold_list.push_front(Node::new(data));
+        self.cold_list.push_front(Node::new(data, NodeType::Cold));
         
         // Check if cold list exceeds capacity
         if self.cold_list.len() > self.cold_capacity {
             // Evict from cold list if it exceeds capacity
             if let Some(evicted) = self.cold_list.pop_back() {
-                // Move evicted item to candidate list
-                self.candidate_list.push_front(evicted);
+                // Move evicted item to free list
+                let mut free_node = evicted.clone();
+                free_node.node_type = NodeType::Free;
+                self.free_list.push_front(free_node);
                 
-                // Check if candidate list exceeds capacity
-                if self.candidate_list.len() > self.candidate_capacity {
-                    // Evict from candidate list if it exceeds capacity
-                    self.candidate_list.pop_back();
+                // Check if free list exceeds capacity
+                if self.free_list.len() > self.free_capacity {
+                    // Evict from free list if it exceeds capacity
+                    self.free_list.pop_back();
                 }
             }
         }
@@ -73,8 +89,8 @@ where
 
     /// Find and access an item in the LRU manager
     pub fn access(&mut self, data: &T) {
-        // Check if the node is in candidate list
-        if let Some(index) = self.candidate_list
+        // Check if the node is in free list
+        if let Some(index) = self.free_list
             .iter()
             .position(|node| &node.data == data) {    
             // Create a new list without the found node
@@ -82,7 +98,7 @@ where
             let mut removed_node = None;
             
             // Iterate through the original list and copy nodes to the new list except the one to remove
-            for (i, node) in self.candidate_list.iter().enumerate() {
+            for (i, node) in self.free_list.iter().enumerate() {
                 if i == index {
                     removed_node = Some(node.clone());
                 } else {
@@ -91,29 +107,35 @@ where
             }
             
             // Replace the original list with the new one
-            self.candidate_list = new_list;
+            self.free_list = new_list;
             
             if let Some(node) = removed_node {
                 // Add to hot list
-                self.hot_list.push_front(node);
+                let mut hot_node = node.clone();
+                hot_node.node_type = NodeType::Hot;
+                self.hot_list.push_front(hot_node);
                 
                 // Check if hot list exceeds capacity
                 if self.hot_list.len() > self.hot_capacity {
                     // Move the least recently used item from hot to cold
                     if let Some(lru_hot) = self.hot_list.pop_back() {
-                        self.cold_list.push_front(lru_hot);
+                        let mut cold_node = lru_hot.clone();
+                        cold_node.node_type = NodeType::Cold;
+                        self.cold_list.push_front(cold_node);
                         
                         // Check if cold list exceeds capacity
                         if self.cold_list.len() > self.cold_capacity {
                             // Evict from cold list if it exceeds capacity
                             if let Some(evicted) = self.cold_list.pop_back() {
-                                // Move evicted item to candidate list
-                                self.candidate_list.push_front(evicted);
+                                // Move evicted item to free list
+                                let mut free_node = evicted.clone();
+                                free_node.node_type = NodeType::Free;
+                                self.free_list.push_front(free_node);
                                 
-                                // Check if candidate list exceeds capacity
-                                if self.candidate_list.len() > self.candidate_capacity {
-                                    // Evict from candidate list if it exceeds capacity
-                                    self.candidate_list.pop_back();
+                                // Check if free list exceeds capacity
+                                if self.free_list.len() > self.free_capacity {
+                                    // Evict from free list if it exceeds capacity
+                                    self.free_list.pop_back();
                                 }
                             }
                         }
@@ -143,15 +165,19 @@ where
             
             if let Some(node) = removed_node {
                 // Add to hot list
-                self.hot_list.push_front(node);
-                
-                // Check if hot list exceeds capacity
-                if self.hot_list.len() > self.hot_capacity {
-                    // Move the least recently used item from hot to cold
-                    if let Some(lru_hot) = self.hot_list.pop_back() {
-                        self.cold_list.push_front(lru_hot);
-                    }
+            let mut hot_node = node.clone();
+            hot_node.node_type = NodeType::Hot;
+            self.hot_list.push_front(hot_node);
+            
+            // Check if hot list exceeds capacity
+            if self.hot_list.len() > self.hot_capacity {
+                // Move the least recently used item from hot to cold
+                if let Some(lru_hot) = self.hot_list.pop_back() {
+                    let mut cold_node = lru_hot.clone();
+                    cold_node.node_type = NodeType::Cold;
+                    self.cold_list.push_front(cold_node);
                 }
+            }
             }
         }
         // Check if the node is in hot list
@@ -176,16 +202,18 @@ where
             
             if let Some(node) = removed_node {
                 // Add to front of hot list
-                self.hot_list.push_front(node);
+            let mut hot_node = node.clone();
+            hot_node.node_type = NodeType::Hot;
+            self.hot_list.push_front(hot_node);
             }
         }
     }
 
     /// Evict the least recently used item from the LRU
     pub fn evict(&mut self) -> Option<Node<T>> {
-        // First try to evict from candidate list
-        if !self.candidate_list.is_empty() {
-            return self.candidate_list.pop_back();
+        // First try to evict from free list
+        if !self.free_list.is_empty() {
+            return self.free_list.pop_back();
         }
         
         // Then try to evict from cold list
