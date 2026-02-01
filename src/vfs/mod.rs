@@ -1,5 +1,5 @@
 //! VFS (Virtual File System) module
-//! 
+//!
 //! This module provides a unified interface for file system operations, with a local file system implementation
 //! that wraps glibc system calls.
 
@@ -19,5 +19,3 @@ pub use local_fs::{LocalFileHandle, LocalFs};
 mod tests {
     include!("tests.rs");
 }
-
-

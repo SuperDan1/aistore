@@ -9,17 +9,19 @@ mod types;
 
 // Import various modules
 mod buffer;
+mod controlfile;
 mod heap;
 mod index;
-mod tablespace;
-mod segment;
-mod controlfile;
-mod lock;
 mod infrastructure;
+mod lock;
+mod segment;
+mod tablespace;
 
 fn main() {
     println!("Aistore storage engine starting...");
-    println!("Loaded modules: buffer, heap, index, tablespace, segment, controlfile, lock, infrastructure");
-    
+    println!(
+        "Loaded modules: buffer, heap, index, tablespace, segment, controlfile, lock, infrastructure"
+    );
+
     println!("\nAistore storage engine startup completed!");
 }

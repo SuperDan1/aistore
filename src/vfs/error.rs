@@ -25,10 +25,14 @@ impl fmt::Display for VfsError {
         match self {
             VfsError::PermissionDenied(path) => write!(f, "Permission denied: {}", path),
             VfsError::NotFound(path) => write!(f, "File or directory not found: {}", path),
-            VfsError::AlreadyExists(path) => write!(f, "File or directory already exists: {}", path),
+            VfsError::AlreadyExists(path) => {
+                write!(f, "File or directory already exists: {}", path)
+            }
             VfsError::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
             VfsError::IoError(err) => write!(f, "I/O error: {}", err),
-            VfsError::SystemError(errno, msg) => write!(f, "System error (errno {}): {}", errno, msg),
+            VfsError::SystemError(errno, msg) => {
+                write!(f, "System error (errno {}): {}", errno, msg)
+            }
         }
     }
 }

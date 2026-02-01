@@ -25,10 +25,7 @@ pub struct Node<T> {
 impl<T> Node<T> {
     /// Create a new LRU node with the specified type
     pub fn new(data: T, node_type: NodeType) -> Self {
-        Node {
-            data,
-            node_type,
-        }
+        Node { data, node_type }
     }
 }
 
@@ -68,7 +65,7 @@ where
     pub fn add(&mut self, data: T) {
         // By default, add to the cold list first
         self.cold_list.push_front(Node::new(data, NodeType::Cold));
-        
+
         // Check if cold list exceeds capacity
         if self.cold_list.len() > self.cold_capacity {
             // Evict from cold list if it exceeds capacity
@@ -77,7 +74,7 @@ where
                 let mut free_node = evicted.clone();
                 free_node.node_type = NodeType::Free;
                 self.free_list.push_front(free_node);
-                
+
                 // Check if free list exceeds capacity
                 if self.free_list.len() > self.free_capacity {
                     // Evict from free list if it exceeds capacity
@@ -90,13 +87,11 @@ where
     /// Find and access an item in the LRU manager
     pub fn access(&mut self, data: &T) {
         // Check if the node is in free list
-        if let Some(index) = self.free_list
-            .iter()
-            .position(|node| &node.data == data) {    
+        if let Some(index) = self.free_list.iter().position(|node| &node.data == data) {
             // Create a new list without the found node
             let mut new_list = LinkedList::new();
             let mut removed_node = None;
-            
+
             // Iterate through the original list and copy nodes to the new list except the one to remove
             for (i, node) in self.free_list.iter().enumerate() {
                 if i == index {
@@ -105,16 +100,16 @@ where
                     new_list.push_back(node.clone());
                 }
             }
-            
+
             // Replace the original list with the new one
             self.free_list = new_list;
-            
+
             if let Some(node) = removed_node {
                 // Add to hot list
                 let mut hot_node = node.clone();
                 hot_node.node_type = NodeType::Hot;
                 self.hot_list.push_front(hot_node);
-                
+
                 // Check if hot list exceeds capacity
                 if self.hot_list.len() > self.hot_capacity {
                     // Move the least recently used item from hot to cold
@@ -122,7 +117,7 @@ where
                         let mut cold_node = lru_hot.clone();
                         cold_node.node_type = NodeType::Cold;
                         self.cold_list.push_front(cold_node);
-                        
+
                         // Check if cold list exceeds capacity
                         if self.cold_list.len() > self.cold_capacity {
                             // Evict from cold list if it exceeds capacity
@@ -131,7 +126,7 @@ where
                                 let mut free_node = evicted.clone();
                                 free_node.node_type = NodeType::Free;
                                 self.free_list.push_front(free_node);
-                                
+
                                 // Check if free list exceeds capacity
                                 if self.free_list.len() > self.free_capacity {
                                     // Evict from free list if it exceeds capacity
@@ -144,13 +139,11 @@ where
             }
         }
         // Check if the node is in cold list
-        else if let Some(index) = self.cold_list
-            .iter()
-            .position(|node| &node.data == data) {    
+        else if let Some(index) = self.cold_list.iter().position(|node| &node.data == data) {
             // Create a new list without the found node
             let mut new_list = LinkedList::new();
             let mut removed_node = None;
-            
+
             // Iterate through the original list and copy nodes to the new list except the one to remove
             for (i, node) in self.cold_list.iter().enumerate() {
                 if i == index {
@@ -159,35 +152,33 @@ where
                     new_list.push_back(node.clone());
                 }
             }
-            
+
             // Replace the original list with the new one
             self.cold_list = new_list;
-            
+
             if let Some(node) = removed_node {
                 // Add to hot list
-            let mut hot_node = node.clone();
-            hot_node.node_type = NodeType::Hot;
-            self.hot_list.push_front(hot_node);
-            
-            // Check if hot list exceeds capacity
-            if self.hot_list.len() > self.hot_capacity {
-                // Move the least recently used item from hot to cold
-                if let Some(lru_hot) = self.hot_list.pop_back() {
-                    let mut cold_node = lru_hot.clone();
-                    cold_node.node_type = NodeType::Cold;
-                    self.cold_list.push_front(cold_node);
+                let mut hot_node = node.clone();
+                hot_node.node_type = NodeType::Hot;
+                self.hot_list.push_front(hot_node);
+
+                // Check if hot list exceeds capacity
+                if self.hot_list.len() > self.hot_capacity {
+                    // Move the least recently used item from hot to cold
+                    if let Some(lru_hot) = self.hot_list.pop_back() {
+                        let mut cold_node = lru_hot.clone();
+                        cold_node.node_type = NodeType::Cold;
+                        self.cold_list.push_front(cold_node);
+                    }
                 }
-            }
             }
         }
         // Check if the node is in hot list
-        else if let Some(index) = self.hot_list
-            .iter()
-            .position(|node| &node.data == data) {    
+        else if let Some(index) = self.hot_list.iter().position(|node| &node.data == data) {
             // Create a new list without the found node
             let mut new_list = LinkedList::new();
             let mut removed_node = None;
-            
+
             // Iterate through the original list and copy nodes to the new list except the one to remove
             for (i, node) in self.hot_list.iter().enumerate() {
                 if i == index {
@@ -196,15 +187,15 @@ where
                     new_list.push_back(node.clone());
                 }
             }
-            
+
             // Replace the original list with the new one
             self.hot_list = new_list;
-            
+
             if let Some(node) = removed_node {
                 // Add to front of hot list
-            let mut hot_node = node.clone();
-            hot_node.node_type = NodeType::Hot;
-            self.hot_list.push_front(hot_node);
+                let mut hot_node = node.clone();
+                hot_node.node_type = NodeType::Hot;
+                self.hot_list.push_front(hot_node);
             }
         }
     }
@@ -215,12 +206,12 @@ where
         if !self.free_list.is_empty() {
             return self.free_list.pop_back();
         }
-        
+
         // Then try to evict from cold list
         if !self.cold_list.is_empty() {
             return self.cold_list.pop_back();
         }
-        
+
         // Finally try to evict from hot list
         self.hot_list.pop_back()
     }
