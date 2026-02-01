@@ -1,5 +1,5 @@
 //! Global type definitions
-//! 
+//!
 //! Stores struct definitions, constants, and type aliases used globally by the storage engine
 /// Block ID type
 pub type BlockId = u64;
@@ -79,8 +79,6 @@ impl From<std::io::Error> for AistoreError {
 
 /// Storage engine result type
 pub type AistoreResult<T> = Result<T, AistoreError>;
-
-
 
 /// Page ID type
 pub type PageId = u64;

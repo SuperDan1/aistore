@@ -1,7 +1,7 @@
 // Hash functions for strings
 
-use xxhash_rust::xxh64;
 use crc_fast;
+use xxhash_rust::xxh64;
 
 /// FNV-1a hash implementation for strings
 /// Returns a 64-bit integer hash value using the simplehash library
@@ -32,8 +32,6 @@ pub fn cityhash_64_hash(s: &str) -> u64 {
 pub fn crc32_hash(s: &str) -> u64 {
     crc_fast::crc32_iso_hdlc(s.as_bytes()) as u64
 }
-
-
 
 /// Hash a string and return an integer
 /// Uses FNV-1a as the default hash algorithm
