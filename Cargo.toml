@@ -17,6 +17,7 @@ libc = "0.2.153"
 
 [dev-dependencies]
 criterion = "0.5.1"
+tempfile = "3.12"
 
 # Criterion bench configuration
 [[bench]]
