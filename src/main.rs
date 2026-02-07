@@ -14,13 +14,15 @@ mod heap;
 mod index;
 mod infrastructure;
 mod lock;
+mod page;
 mod segment;
 mod tablespace;
+mod vfs;
 
 fn main() {
     println!("Aistore storage engine starting...");
     println!(
-        "Loaded modules: buffer, heap, index, tablespace, segment, controlfile, lock, infrastructure"
+        "Loaded modules: buffer, heap, index, tablespace, segment, controlfile, lock, infrastructure, page, vfs"
     );
 
     println!("\nAistore storage engine startup completed!");
