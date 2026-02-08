@@ -12,6 +12,7 @@ pub mod infrastructure;
 pub mod lock;
 pub mod page;
 pub mod segment;
+pub mod table;
 pub mod tablespace;
 pub mod vfs;
 
