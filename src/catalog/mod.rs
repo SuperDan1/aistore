@@ -287,8 +287,8 @@ impl Catalog {
         }
 
         let mut table = Table::with_type(table_id, table_name, segment_id, table_type);
+        table.set_columns(columns);
         table.row_count = row_count;
-        table.column_count = columns.len() as u32;
         table.created_at = created_at;
 
         Ok(Some(Arc::new(table)))
