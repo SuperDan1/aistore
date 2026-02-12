@@ -152,6 +152,12 @@ impl Table {
         &self.columns
     }
 
+    /// Set columns (for catalog loading)
+    pub fn set_columns(&mut self, columns: Vec<Column>) {
+        self.column_count = columns.len() as u32;
+        self.columns = columns;
+    }
+
     /// Get column count
     pub fn column_count(&self) -> u32 {
         self.column_count
