@@ -7,7 +7,7 @@
 //! - Page: 8KB, the basic unit of storage
 
 use crate::buffer::BufferMgr;
-use crate::types::{PageId, SegmentId, BLOCK_SIZE};
+use crate::types::{BLOCK_SIZE, PageId, SegmentId};
 use crc32fast;
 use std::fmt;
 use std::fs::{File, OpenOptions};

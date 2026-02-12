@@ -1,5 +1,6 @@
 //! Table structure for storing table metadata
 
+use crate::table::Column;
 use crate::types::SegmentId;
 use std::fmt;
 
@@ -31,6 +32,7 @@ impl fmt::Display for TableType {
 /// - table_name: Human-readable name
 /// - segment_id: Associated storage segment
 /// - table_type: Type of table (user/system/temporary)
+/// - columns: Column definitions for the table schema
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
     /// Unique table identifier
@@ -47,6 +49,8 @@ pub struct Table {
     pub column_count: u32,
     /// Creation timestamp
     pub created_at: u64,
+    /// Column definitions
+    pub columns: Vec<Column>,
 }
 
 impl Table {
@@ -60,6 +64,7 @@ impl Table {
             row_count: 0,
             column_count: 0,
             created_at: current_timestamp(),
+            columns: Vec::new(),
         }
     }
 
@@ -78,6 +83,27 @@ impl Table {
             row_count: 0,
             column_count: 0,
             created_at: current_timestamp(),
+            columns: Vec::new(),
+        }
+    }
+
+    /// Create a new table with columns
+    pub fn with_columns(
+        table_id: u64,
+        table_name: String,
+        segment_id: SegmentId,
+        columns: Vec<Column>,
+    ) -> Self {
+        let column_count = columns.len() as u32;
+        Self {
+            table_id,
+            table_name,
+            segment_id,
+            table_type: TableType::User,
+            row_count: 0,
+            column_count,
+            created_at: current_timestamp(),
+            columns,
         }
     }
 
@@ -109,6 +135,26 @@ impl Table {
     /// Check if this is a temporary table
     pub fn is_temporary(&self) -> bool {
         self.table_type == TableType::Temporary
+    }
+
+    /// Get column by name
+    pub fn get_column(&self, name: &str) -> Option<&Column> {
+        self.columns.iter().find(|c| c.name() == name)
+    }
+
+    /// Get column by ordinal position
+    pub fn get_column_by_ordinal(&self, ordinal: u32) -> Option<&Column> {
+        self.columns.iter().find(|c| c.ordinal() == ordinal)
+    }
+
+    /// Get all columns
+    pub fn columns(&self) -> &[Column] {
+        &self.columns
+    }
+
+    /// Get column count
+    pub fn column_count(&self) -> u32 {
+        self.column_count
     }
 }
 
@@ -147,5 +193,40 @@ mod tests {
     fn test_table_temporary() {
         let table = Table::with_type(3, "temp_table".to_string(), 300, TableType::Temporary);
         assert!(table.is_temporary());
+    }
+
+    #[test]
+    fn test_table_with_columns() {
+        use crate::types::ColumnType;
+
+        let columns = vec![
+            Column::new("id".to_string(), ColumnType::Int64, false, 0),
+            Column::new("name".to_string(), ColumnType::Varchar(255), true, 1),
+        ];
+
+        let table = Table::with_columns(1, "test_table".to_string(), 100, columns);
+        assert_eq!(table.column_count(), 2);
+        assert_eq!(table.columns().len(), 2);
+
+        let id_col = table.get_column("id").unwrap();
+        assert_eq!(id_col.ordinal(), 0);
+        assert!(!id_col.is_nullable());
+
+        let name_col = table.get_column_by_ordinal(1).unwrap();
+        assert_eq!(name_col.name(), "name");
+        assert!(name_col.is_nullable());
+    }
+
+    #[test]
+    fn test_table_get_column_not_found() {
+        let table = Table::new(1, "test".to_string(), 100);
+        assert!(table.get_column("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_table_empty_columns() {
+        let table = Table::new(1, "test".to_string(), 100);
+        assert_eq!(table.column_count(), 0);
+        assert!(table.columns().is_empty());
     }
 }
