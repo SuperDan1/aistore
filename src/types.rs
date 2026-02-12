@@ -1,6 +1,8 @@
-//! Global type definitions
-//!
-//! Stores struct definitions, constants, and type aliases used globally by the storage engine
+use std::fmt;
+
+/// Global type definitions
+///
+/// Stores struct definitions, constants, and type aliases used globally by the storage engine
 /// Block ID type
 pub type BlockId = u64;
 
@@ -228,4 +230,154 @@ pub struct TransactionInfo {
     pub start_time: Timestamp,
     /// End time
     pub end_time: Option<Timestamp>,
+}
+
+/// Column type enumeration for table schema
+///
+/// Represents the data type of a column in a table schema.
+/// Each variant represents a different storage format and size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnType {
+    /// 8-bit signed integer
+    Int8,
+    /// 16-bit signed integer
+    Int16,
+    /// 32-bit signed integer
+    Int32,
+    /// 64-bit signed integer
+    Int64,
+    /// 8-bit unsigned integer
+    UInt8,
+    /// 16-bit unsigned integer
+    UInt16,
+    /// 32-bit unsigned integer
+    UInt32,
+    /// 64-bit unsigned integer
+    UInt64,
+    /// 32-bit floating point
+    Float32,
+    /// 64-bit floating point
+    Float64,
+    /// Variable-length string with maximum length
+    Varchar(u32),
+    /// Binary large object with maximum length
+    Blob(u32),
+    /// Boolean
+    Bool,
+}
+
+impl ColumnType {
+    /// Returns the default storage size in bytes for this column type.
+    ///
+    /// For variable-length types (Varchar, Blob), returns the size of the
+    /// length prefix (4 bytes) plus the maximum length.
+    pub fn size(&self) -> usize {
+        match self {
+            ColumnType::Int8 | ColumnType::UInt8 | ColumnType::Bool => 1,
+            ColumnType::Int16 | ColumnType::UInt16 => 2,
+            ColumnType::Int32 | ColumnType::UInt32 | ColumnType::Float32 => 4,
+            ColumnType::Int64 | ColumnType::UInt64 | ColumnType::Float64 => 8,
+            ColumnType::Varchar(max_len) => 4 + *max_len as usize,
+            ColumnType::Blob(max_len) => 4 + *max_len as usize,
+        }
+    }
+
+    /// Returns true if this is a variable-length type.
+    ///
+    /// Variable-length types require additional metadata to store their actual length.
+    pub fn is_variable_length(&self) -> bool {
+        matches!(self, ColumnType::Varchar(_) | ColumnType::Blob(_))
+    }
+
+    /// Returns true if this is a numeric type (integer or floating point).
+    pub fn is_numeric(&self) -> bool {
+        matches!(
+            self,
+            ColumnType::Int8
+                | ColumnType::Int16
+                | ColumnType::Int32
+                | ColumnType::Int64
+                | ColumnType::UInt8
+                | ColumnType::UInt16
+                | ColumnType::UInt32
+                | ColumnType::UInt64
+                | ColumnType::Float32
+                | ColumnType::Float64
+        )
+    }
+}
+
+impl fmt::Display for ColumnType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ColumnType::Int8 => write!(f, "INT8"),
+            ColumnType::Int16 => write!(f, "INT16"),
+            ColumnType::Int32 => write!(f, "INT32"),
+            ColumnType::Int64 => write!(f, "INT64"),
+            ColumnType::UInt8 => write!(f, "UINT8"),
+            ColumnType::UInt16 => write!(f, "UINT16"),
+            ColumnType::UInt32 => write!(f, "UINT32"),
+            ColumnType::UInt64 => write!(f, "UINT64"),
+            ColumnType::Float32 => write!(f, "FLOAT32"),
+            ColumnType::Float64 => write!(f, "FLOAT64"),
+            ColumnType::Varchar(max_len) => write!(f, "VARCHAR({})", max_len),
+            ColumnType::Blob(max_len) => write!(f, "BLOB({})", max_len),
+            ColumnType::Bool => write!(f, "BOOL"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod column_type_tests {
+    use super::*;
+
+    #[test]
+    fn test_column_type_sizes() {
+        assert_eq!(ColumnType::Int8.size(), 1);
+        assert_eq!(ColumnType::Int16.size(), 2);
+        assert_eq!(ColumnType::Int32.size(), 4);
+        assert_eq!(ColumnType::Int64.size(), 8);
+        assert_eq!(ColumnType::UInt8.size(), 1);
+        assert_eq!(ColumnType::UInt16.size(), 2);
+        assert_eq!(ColumnType::UInt32.size(), 4);
+        assert_eq!(ColumnType::UInt64.size(), 8);
+        assert_eq!(ColumnType::Float32.size(), 4);
+        assert_eq!(ColumnType::Float64.size(), 8);
+        assert_eq!(ColumnType::Bool.size(), 1);
+    }
+
+    #[test]
+    fn test_column_type_variable_sizes() {
+        assert_eq!(ColumnType::Varchar(100).size(), 104);
+        assert_eq!(ColumnType::Varchar(255).size(), 259);
+        assert_eq!(ColumnType::Blob(1024).size(), 1028);
+    }
+
+    #[test]
+    fn test_column_type_display() {
+        assert_eq!(ColumnType::Int8.to_string(), "INT8");
+        assert_eq!(ColumnType::Int32.to_string(), "INT32");
+        assert_eq!(ColumnType::UInt64.to_string(), "UINT64");
+        assert_eq!(ColumnType::Float32.to_string(), "FLOAT32");
+        assert_eq!(ColumnType::Varchar(255).to_string(), "VARCHAR(255)");
+        assert_eq!(ColumnType::Blob(1024).to_string(), "BLOB(1024)");
+        assert_eq!(ColumnType::Bool.to_string(), "BOOL");
+    }
+
+    #[test]
+    fn test_column_type_is_variable_length() {
+        assert!(!ColumnType::Int32.is_variable_length());
+        assert!(!ColumnType::Float64.is_variable_length());
+        assert!(ColumnType::Varchar(100).is_variable_length());
+        assert!(ColumnType::Blob(256).is_variable_length());
+    }
+
+    #[test]
+    fn test_column_type_is_numeric() {
+        assert!(ColumnType::Int32.is_numeric());
+        assert!(ColumnType::UInt64.is_numeric());
+        assert!(ColumnType::Float32.is_numeric());
+        assert!(!ColumnType::Varchar(100).is_numeric());
+        assert!(!ColumnType::Bool.is_numeric());
+    }
 }

@@ -1,6 +1,6 @@
 //! Segment storage implementation
 
-use crate::tablespace::{ExtentHeader, FreeExtent, EXTENT_USABLE_PAGES};
+use crate::tablespace::{EXTENT_USABLE_PAGES, ExtentHeader, FreeExtent};
 use crate::types::Timestamp;
 use crc32fast;
 use std::fmt;

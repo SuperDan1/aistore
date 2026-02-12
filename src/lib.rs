@@ -5,6 +5,7 @@ pub mod types;
 
 // Import various modules
 pub mod buffer;
+pub mod catalog;
 pub mod controlfile;
 pub mod heap;
 pub mod index;

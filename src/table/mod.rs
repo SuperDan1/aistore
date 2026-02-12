@@ -5,9 +5,13 @@
 //! - System cache (syscache) for quick table lookups
 //! - Table creation with automatic segment allocation
 
+pub mod builder;
+pub mod column;
 pub mod syscache;
 pub mod table;
 
+pub use builder::TableBuilder;
+pub use column::Column;
 pub use syscache::SysCache;
 pub use table::Table;
 pub use table::TableType;
