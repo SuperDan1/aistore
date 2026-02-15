@@ -1,11 +1,9 @@
 //! Segment storage implementation
 
-use crate::tablespace::{EXTENT_USABLE_PAGES, ExtentHeader, FreeExtent};
+use crate::tablespace::FreeExtent;
 use crate::types::Timestamp;
 use crc32fast;
 use std::fmt;
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::sync::Arc;
 
 pub const SEGMENT_MAGIC: u32 = 0x53454721; // "SEG!"
 pub const SEGMENT_VERSION: u32 = 1;

@@ -4,7 +4,7 @@ use crate::types::SegmentId;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -48,7 +48,7 @@ impl Catalog {
     }
 
     pub fn load(data_dir: impl AsRef<Path>) -> CatalogResult<Self> {
-        let mut catalog = Self::new(data_dir)?;
+        let catalog = Self::new(data_dir)?;
 
         if catalog.system_dir.exists() {
             for entry in fs::read_dir(&catalog.system_dir)? {
@@ -131,7 +131,7 @@ impl Catalog {
     }
 
     pub fn drop_table(&self, table_name: &str) -> CatalogResult<()> {
-        let table_id = {
+        let _table_id = {
             let mut name_cache = self.name_cache.write();
             let entry = name_cache
                 .remove(table_name)

@@ -7,13 +7,13 @@ pub mod lru;
 
 use crate::infrastructure::hash::fnv1a_hash;
 use crate::page::Page;
-use crate::types::{PAGE_SIZE, PageId};
+use crate::types::{PageId, PAGE_SIZE};
 use crate::vfs::{VfsError, VfsInterface};
 use lru::LruManager;
 use std::alloc;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::{fmt, mem};
 
 /// Invalid page ID constant
@@ -199,7 +199,7 @@ impl fmt::Display for BufferError {
 impl std::error::Error for BufferError {}
 
 impl From<VfsError> for BufferError {
-    fn from(err: VfsError) -> Self {
+    fn from(_err: VfsError) -> Self {
         BufferError::PageNotFound(0) // VFS errors treated as page not found
     }
 }

@@ -7,11 +7,11 @@
 //! - Page: 8KB, the basic unit of storage
 
 use crate::buffer::BufferMgr;
-use crate::types::{BLOCK_SIZE, PageId, SegmentId};
+use crate::types::{PageId, SegmentId, BLOCK_SIZE};
 use crc32fast;
 use std::fmt;
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::fs::File;
+use std::io::{Seek, SeekFrom};
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -313,7 +313,6 @@ impl SegmentManager {
     /// Create or open a segment storage file
     pub fn new<P: AsRef<std::path::Path>>(path: P) -> SegmentResult<Self> {
         use std::fs::{File, OpenOptions};
-        use std::io::{Read, Seek, SeekFrom, Write};
 
         let path_ref = path.as_ref();
 
@@ -440,8 +439,6 @@ impl SegmentManager {
 
     /// Allocate a new extent
     fn allocate_extent(&self) -> SegmentResult<u64> {
-        use std::io::{Seek, SeekFrom, Write};
-
         // Get current file size as the starting position of new extent
         let extent_ptr = {
             let fh = self.cached_file_header.read().expect("RwLock poisoned");
@@ -546,7 +543,7 @@ impl SegmentManager {
 
         {
             let mut handle = self.file_handle.write().expect("RwLock poisoned");
-            let mut file = &mut *handle;
+            let file = &mut *handle;
             file.seek(SeekFrom::Start(segment_offset))?;
             file.read_exact(&mut bytes)?;
         }
@@ -696,7 +693,7 @@ impl SegmentManager {
         let mut page_data = vec![0u8; BLOCK_SIZE];
         {
             let mut handle = self.file_handle.write().expect("RwLock poisoned");
-            let mut file = &mut *handle;
+            let file = &mut *handle;
             file.seek(SeekFrom::Start(file_offset))?;
             file.read_exact(&mut page_data)?;
         }

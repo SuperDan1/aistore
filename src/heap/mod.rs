@@ -6,7 +6,7 @@ use crate::types::{BlockId, INVALID_BLOCK_ID};
 /// - Allocating resources
 /// - Acquiring locks
 /// - Preparing data structures
-fn begininsert(tuple: *mut std::ffi::c_void) -> BlockId {
+fn begininsert(_tuple: *mut std::ffi::c_void) -> BlockId {
     // Implement preparation logic before insertion
     println!("begininsert: Start insertion operation, preparing resources");
 
@@ -21,7 +21,7 @@ fn begininsert(tuple: *mut std::ffi::c_void) -> BlockId {
 /// - Executing actual tuple insertion
 /// - Updating data structures
 /// - Handling conflicts
-fn doinsert(tuple: *mut std::ffi::c_void, block_id: BlockId) -> bool {
+fn doinsert(_tuple: *mut std::ffi::c_void, block_id: BlockId) -> bool {
     // Implement actual insertion logic
     println!("doinsert: Perform actual insertion in block {}", block_id);
 
@@ -35,7 +35,7 @@ fn doinsert(tuple: *mut std::ffi::c_void, block_id: BlockId) -> bool {
 /// - Releasing resources
 /// - Releasing locks
 /// - Committing or rolling back transactions
-fn endinsert(success: bool, block_id: BlockId) {
+fn endinsert(success: bool, _block_id: BlockId) {
     // Implement cleanup logic after insertion
     if success {
         println!("endinsert: Insertion operation successful, cleaning up resources");

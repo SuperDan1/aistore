@@ -115,7 +115,6 @@ where
 }
 
 // Re-export the wrappers for easy access
-pub use StdHashMapWrapper as HashMap;
 
 #[cfg(test)]
 mod tests {
