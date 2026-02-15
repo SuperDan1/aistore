@@ -7,5 +7,3 @@ pub mod page;
 
 // Re-export Page struct for easier access
 pub use page::Page;
-pub use page::PageType;
-pub use page::Special;

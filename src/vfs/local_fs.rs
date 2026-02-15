@@ -2,10 +2,7 @@
 
 use crate::vfs::error::{VfsError, VfsResult};
 use crate::vfs::interface::{FileHandle, VfsInterface};
-use libc::{self, c_int, c_ulong, c_void, mode_t, off_t, size_t};
-use std::os::raw::c_char;
-use std::path::Path;
-use std::ptr;
+use libc::{self, c_int, c_void, mode_t, off_t, size_t};
 
 /// Local file handle implementation
 pub struct LocalFileHandle {

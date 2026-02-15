@@ -5,15 +5,17 @@
 
 // Re-export error types and result type
 pub mod error;
-pub use error::{VfsError, VfsResult};
+pub use error::VfsError;
+pub use error::VfsResult;
 
 // Re-export interface traits
 pub mod interface;
-pub use interface::{FileHandle, VfsInterface};
+pub use interface::FileHandle;
+pub use interface::VfsInterface;
 
 // Re-export local file system implementation
 pub mod local_fs;
-pub use local_fs::{LocalFileHandle, LocalFs};
+pub use local_fs::LocalFs;
 
 #[cfg(test)]
 mod tests {
