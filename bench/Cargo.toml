@@ -1,0 +1,20 @@
+[[bin]]
+name = "aistore-bench"
+path = "src/main.rs"
+
+[package]
+name = "aistore-bench"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aistore = { path = ".." }
+clap = { version = "4.5", features = ["derive"] }
+rand = "0.8"
+rayon = "1.10"
+parking_lot = "0.12"
+chrono = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true

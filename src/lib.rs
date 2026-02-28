@@ -32,5 +32,6 @@ pub use heap::{HeapTable, RowId, Tuple, Value};
 // Re-export sql items
 pub use sql::{parse, Statement};
 
-// Re-export executor
+// Re-export executor and catalog
+pub use catalog::Catalog;
 pub use executor::Executor;
