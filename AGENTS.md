@@ -18,6 +18,27 @@ aistore/
 │   ├── tablespace/        # Tablespace management (ORG)
 │   ├── heap/              # Heap file organization
 │   ├── index/             # B-tree indexes
+│   ├── table/             # Table metadata, columns (DATA MODEL)
+│   ├── catalog/           # System catalog, table persistence
+│   ├── lock/              # Lock management
+│   ├── controlfile/       # Metadata persistence
+│   ├── binlog/            # Binary logging
+│   ├── redolog/           # Write-ahead log
+│   └── systable/         # System catalogs
+├── Cargo.toml
+└── AGENTS.md (this file)
+```
+```
+aistore/
+├── src/
+│   ├── infrastructure/    # Hash algos, hash tables, lwlock (PRIMITIVES)
+│   ├── buffer/            # LRU buffer pool (CACHING)
+│   ├── vfs/               # Virtual filesystem (ABSTRACTION)
+│   ├── page/              # Page structure (STORAGE UNIT)
+│   ├── segment/           # 64MB segments (STORAGE LAYOUT)
+│   ├── tablespace/        # Tablespace management (ORG)
+│   ├── heap/              # Heap file organization
+│   ├── index/             # B-tree indexes
 │   ├── lock/              # Lock management
 │   ├── controlfile/       # Metadata persistence
 │   ├── binlog/            # Binary logging
@@ -77,6 +98,13 @@ const PIN_COUNT_SHIFT: u8 = 8;
 - **Cache line alignment**: `#[repr(align(64))]` on x86_64
 - **Prefer parking_lot** over std::sync
 
+### Non-Standard Patterns (Deviations)
+- **Rust 2024 Edition**: `edition = "2024"` in Cargo.toml (bleeding-edge, not 2021)
+- **Minimal CI**: No clippy, fmt check, or caching in `.github/workflows/rust.yml`
+- **Global allocator**: jemalloc via `#[global_allocator]`
+- **Cache line alignment**: `#[repr(align(64))]` on x86_64
+- **Prefer parking_lot** over std::sync
+
 ## ANTI-PATTERNS (THIS PROJECT)
 
 ### CRITICAL - Never Do
@@ -119,6 +147,10 @@ cargo bench --bench hash_bench        # Hash performance
 ## MODULE-SPECIFIC GUIDES
 
 - [buffer/AGENTS.md](src/buffer/AGENTS.md) - Buffer pool patterns
+- [vfs/AGENTS.md](src/vfs/AGENTS.md) - VFS interface patterns
+- [tablespace/AGENTS.md](src/tablespace/AGENTS.md) - Segment-page storage
+- [table/AGENTS.md](src/table/AGENTS.md) - Table metadata & columns
+- [catalog/AGENTS.md](src/catalog/AGENTS.md) - System catalog
 - [vfs/AGENTS.md](src/vfs/AGENTS.md) - VFS interface patterns
 - [tablespace/AGENTS.md](src/tablespace/AGENTS.md) - Segment-page storage
 
