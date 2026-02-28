@@ -108,11 +108,19 @@ impl Executor {
             let tuples = heap_table
                 .scan()
                 .map_err(|e| ExecError::Other(e.to_string()))?;
-            if tuples.is_empty() {
+            let filtered: Vec<_> = if let Some(ref where_cond) = sel.where_clause {
+                tuples
+                    .into_iter()
+                    .filter(|t| self.eval_where(t, where_cond))
+                    .collect()
+            } else {
+                tuples
+            };
+            if filtered.is_empty() {
                 return Ok("(empty result)".to_string());
             }
             let mut output = String::new();
-            for tuple in tuples {
+            for tuple in filtered {
                 let vals: Vec<String> = tuple.values().iter().map(|v| format_value(v)).collect();
                 output.push_str(&vals.join(" | "));
                 output.push('\n');
@@ -120,6 +128,45 @@ impl Executor {
             return Ok(output);
         }
         Err(ExecError::TableNotFound(sel.from))
+    }
+
+    fn eval_where(&self, tuple: &crate::heap::Tuple, condition: &str) -> bool {
+        let cond = condition.trim();
+        let op = if cond.contains("=")
+            && !cond.contains("==")
+            && !cond.contains(">=")
+            && !cond.contains("<=")
+        {
+            "="
+        } else if cond.contains(">=") {
+            ">="
+        } else if cond.contains("<=") {
+            "<="
+        } else if cond.contains("!=") {
+            "!="
+        } else if cond.contains(">") {
+            ">"
+        } else if cond.contains("<") {
+            "<"
+        } else {
+            return true;
+        };
+
+        let parts: Vec<&str> = cond.split(op).collect();
+        if parts.len() != 2 {
+            return true;
+        }
+        let col_name = parts[0].trim();
+        let val_str = parts[1].trim();
+
+        let table = self.heap_tables.values().next().unwrap().table();
+        let columns = table.columns();
+        if let Some(idx) = columns.iter().position(|c| c.name() == col_name) {
+            if let Some(tuple_val) = tuple.values().get(idx) {
+                return compare_values(tuple_val, val_str, op);
+            }
+        }
+        true
     }
 
     fn execute_update(&mut self, upd: sql::UpdateStmt) -> ExecResult<String> {
@@ -197,4 +244,105 @@ fn parse_value(val: &str, col_type: &ColumnType) -> Value {
         val
     };
     Value::VarChar(s.to_string())
+}
+
+fn compare_values(tuple_val: &Value, cond_val: &str, op: &str) -> bool {
+    let cond_val = cond_val.trim();
+    let cmp_i64 = cond_val.parse::<i64>();
+    let cmp_f64 = cond_val.parse::<f64>();
+    match tuple_val {
+        Value::Int8(n) => {
+            if let Ok(v) = cmp_i64 {
+                compare_num(*n as i64, v, op)
+            } else {
+                true
+            }
+        }
+        Value::Int16(n) => {
+            if let Ok(v) = cmp_i64 {
+                compare_num(*n as i64, v, op)
+            } else {
+                true
+            }
+        }
+        Value::Int32(n) => {
+            if let Ok(v) = cmp_i64 {
+                compare_num(*n as i64, v, op)
+            } else {
+                true
+            }
+        }
+        Value::Int64(n) => {
+            if let Ok(v) = cmp_i64 {
+                compare_num(*n, v, op)
+            } else {
+                true
+            }
+        }
+        Value::UInt8(n) => {
+            if let Ok(v) = cmp_i64 {
+                compare_num(*n as i64, v, op)
+            } else {
+                true
+            }
+        }
+        Value::UInt16(n) => {
+            if let Ok(v) = cmp_i64 {
+                compare_num(*n as i64, v, op)
+            } else {
+                true
+            }
+        }
+        Value::UInt32(n) => {
+            if let Ok(v) = cmp_i64 {
+                compare_num(*n as i64, v, op)
+            } else {
+                true
+            }
+        }
+        Value::UInt64(n) => {
+            if let Ok(v) = cmp_i64 {
+                compare_num(*n as i64, v, op)
+            } else {
+                true
+            }
+        }
+        Value::Float32(n) => {
+            if let Ok(v) = cmp_f64 {
+                compare_num(*n as f64, v, op)
+            } else {
+                true
+            }
+        }
+        Value::Float64(n) => {
+            if let Ok(v) = cmp_f64 {
+                compare_num(*n, v, op)
+            } else {
+                true
+            }
+        }
+        Value::VarChar(s) => compare_str(s, cond_val, op),
+        _ => true,
+    }
+}
+
+fn compare_num<T: PartialOrd>(a: T, b: T, op: &str) -> bool {
+    match op {
+        "=" | "==" => a == b,
+        "!=" => a != b,
+        ">" => a > b,
+        "<" => a < b,
+        ">=" => a >= b,
+        "<=" => a <= b,
+        _ => true,
+    }
+}
+
+fn compare_str(a: &str, b: &str, op: &str) -> bool {
+    let b = b.trim().trim_matches('\'').trim_matches('"');
+    match op {
+        "=" | "==" => a == b,
+        "!=" => a != b,
+        _ => true,
+    }
 }

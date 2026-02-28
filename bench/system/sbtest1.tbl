@@ -1,0 +1,5 @@
+1|sbtest1|1|User|0|4|1772269592
+COLUMN|id|Int64|true|0
+COLUMN|k|Int64|true|1
+COLUMN|c|Int32|true|2
+COLUMN|pad|Int32|true|3
