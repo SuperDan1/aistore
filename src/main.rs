@@ -18,6 +18,10 @@ mod page;
 mod segment;
 mod tablespace;
 mod vfs;
+mod table;
+mod catalog;
+mod sql;
+mod executor;
 
 fn main() {
     println!("Aistore storage engine starting...");
