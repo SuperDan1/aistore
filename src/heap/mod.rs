@@ -504,4 +504,53 @@ impl HeapTable {
 
         page.delete_tuple(row_id.slot_idx)
     }
+
+    /// Flush all dirty pages to disk (basic persistence)
+    pub fn flush(&self, data_dir: &std::path::Path) -> std::io::Result<()> {
+        use std::fs::File;
+        use std::io::Write;
+        
+        let table_name = self.table.table_name.as_str();
+        let dir_path = data_dir.join(table_name);
+        std::fs::create_dir_all(&dir_path)?;
+        
+        for (page_id, page) in &self.pages {
+            let page_file = dir_path.join(format!("page_{}.dat", page_id));
+            let mut file = File::create(page_file)?;
+            file.write_all(page.as_bytes())?;
+        }
+        Ok(())
+    }
+
+    /// Load pages from disk (basic persistence)
+    pub fn load(&mut self, data_dir: &std::path::Path) -> std::io::Result<()> {
+        use std::fs::File;
+        use std::io::Read;
+        
+        let table_name = self.table.table_name.as_str();
+        let dir_path = data_dir.join(table_name);
+        
+        if !dir_path.exists() {
+            return Ok(());
+        }
+        
+        for entry in std::fs::read_dir(&dir_path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if let Some(name) = path.file_name() {
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with("page_") && name_str.ends_with(".dat") {
+                    let page_id_str = name_str.trim_start_matches("page_").trim_end_matches(".dat");
+                    if let Ok(page_id) = page_id_str.parse::<u64>() {
+                        let mut file = File::open(&path)?;
+                        let mut data = vec![0u8; PAGE_SIZE];
+                        file.read_exact(&mut data)?;
+                        let page = HeapPage::from_bytes(page_id, &data);
+                        self.pages.insert(page_id, page);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
