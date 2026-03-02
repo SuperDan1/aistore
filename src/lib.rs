@@ -29,6 +29,9 @@ pub use vfs::VfsInterface;
 // Re-export heap items for easier access
 pub use heap::{HeapTable, RowId, Tuple, Value};
 
+// Re-export lock items for easier access
+pub use lock::{LockManager, LockMode, TransactionId};
+
 // Re-export storage engine API
 pub use storage::{Filter, StorageEngine, StorageError, StorageResult, TableId};
 

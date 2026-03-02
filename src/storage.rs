@@ -5,7 +5,9 @@
 use crate::buffer::BufferMgr;
 use crate::catalog::Catalog;
 use crate::heap::{HeapTable, RowId, Tuple, Value};
+use crate::lock::{LockManager, LockMode, TransactionId};
 use crate::table::Column;
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -26,6 +28,10 @@ pub struct Filter {
 pub enum StorageError {
     TableNotFound(String),
     TableAlreadyExists(String),
+    TransactionNotFound,
+    TransactionNotActive,
+    LockTimeout,
+    Deadlock,
     Other(String),
 }
 
@@ -34,6 +40,10 @@ impl std::fmt::Display for StorageError {
         match self {
             StorageError::TableNotFound(name) => write!(f, "Table not found: {}", name),
             StorageError::TableAlreadyExists(name) => write!(f, "Table already exists: {}", name),
+            StorageError::TransactionNotFound => write!(f, "Transaction not found"),
+            StorageError::TransactionNotActive => write!(f, "Transaction not active"),
+            StorageError::LockTimeout => write!(f, "Lock timeout"),
+            StorageError::Deadlock => write!(f, "Deadlock detected"),
             StorageError::Other(msg) => write!(f, "Storage error: {}", msg),
         }
     }
@@ -53,6 +63,7 @@ pub struct StorageEngine {
     catalog: Arc<Catalog>,
     buffer_mgr: Arc<BufferMgr>,
     tables: HashMap<String, HeapTable>,
+    lock_mgr: LockManager,
 }
 
 impl StorageEngine {
@@ -69,10 +80,13 @@ impl StorageEngine {
             data_dir.clone(),
         ));
 
+        let lock_mgr = LockManager::new();
+
         Ok(Self {
             catalog: Arc::new(catalog),
             buffer_mgr,
             tables: HashMap::new(),
+            lock_mgr,
         })
     }
 
@@ -183,6 +197,29 @@ impl StorageEngine {
     /// List all tables
     pub fn list_tables(&self) -> Vec<String> {
         self.tables.keys().cloned().collect()
+    }
+
+    /// Begin a new transaction
+    pub fn begin_transaction(&mut self) -> TransactionId {
+        self.lock_mgr.begin()
+    }
+
+    /// Commit a transaction
+    pub fn commit(&mut self, tx_id: TransactionId) -> StorageResult<()> {
+        self.lock_mgr.commit(tx_id).map_err(|e| match e {
+            crate::lock::LockError::Timeout => StorageError::LockTimeout,
+            crate::lock::LockError::Deadlock => StorageError::Deadlock,
+            _ => StorageError::Other(e.to_string()),
+        })
+    }
+
+    /// Abort a transaction
+    pub fn abort(&mut self, tx_id: TransactionId) -> StorageResult<()> {
+        self.lock_mgr.abort(tx_id).map_err(|e| match e {
+            crate::lock::LockError::Timeout => StorageError::LockTimeout,
+            crate::lock::LockError::Deadlock => StorageError::Deadlock,
+            _ => StorageError::Other(e.to_string()),
+        })
     }
 
     /// Flush all dirty pages to disk
