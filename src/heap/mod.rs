@@ -4,6 +4,7 @@
 use crate::buffer::BufferMgr;
 use crate::table::{Column, Table};
 use crate::types::{PageId, PAGE_SIZE};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub type HeapResult<T> = Result<T, HeapError>;
@@ -208,6 +209,7 @@ impl Tuple {
     }
 }
 
+#[derive(Clone)]
 pub struct HeapPage {
     page_id: PageId,
     data: [u8; PAGE_SIZE],
@@ -317,6 +319,7 @@ pub struct HeapTable {
     table: Arc<Table>,
     buffer_mgr: Arc<BufferMgr>,
     first_page_id: PageId,
+    pages: HashMap<PageId, HeapPage>,
 }
 
 impl HeapTable {
@@ -325,6 +328,7 @@ impl HeapTable {
             table,
             buffer_mgr,
             first_page_id,
+            pages: HashMap::new(),
         }
     }
 
@@ -336,11 +340,11 @@ impl HeapTable {
     }
 
     fn fetch_page(&mut self, page_id: PageId) -> HeapResult<HeapPage> {
-        // TODO: Integrate with BufferMgr properly
-        Ok(HeapPage::new(page_id))
+        Ok(self.pages.get(&page_id).cloned().unwrap_or_else(|| HeapPage::new(page_id)))
     }
 
-    fn write_page(&mut self, _page_id: PageId, _heap_page: &HeapPage) -> HeapResult<()> {
+    fn write_page(&mut self, page_id: PageId, heap_page: &HeapPage) -> HeapResult<()> {
+        self.pages.insert(page_id, heap_page.clone());
         Ok(())
     }
 
