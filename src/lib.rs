@@ -35,3 +35,6 @@ pub use sql::{parse, Statement};
 // Re-export executor and catalog
 pub use catalog::Catalog;
 pub use executor::Executor;
+
+// Re-export buffer items
+pub use buffer::BufferMgr;

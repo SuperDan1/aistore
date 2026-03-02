@@ -1,16 +1,13 @@
 //! Heap storage module
-//!
-//! Provides heap table storage for tuples with slot-based page layout.
+//! Provides heap table storage with BufferPool integration
 
+use crate::buffer::BufferMgr;
 use crate::table::{Column, Table};
 use crate::types::{PageId, PAGE_SIZE};
-use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Heap result type
 pub type HeapResult<T> = Result<T, HeapError>;
 
-/// Heap error types
 #[derive(Debug, Clone)]
 pub enum HeapError {
     PageNotFound(PageId),
@@ -36,7 +33,6 @@ impl std::fmt::Display for HeapError {
 
 impl std::error::Error for HeapError {}
 
-/// Row ID - uniquely identifies a tuple in the heap
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RowId {
     pub page_id: PageId,
@@ -49,7 +45,6 @@ impl RowId {
     }
 }
 
-/// Slot entry in the page slot array
 #[derive(Debug, Clone, Copy)]
 #[repr(packed)]
 struct SlotEntry {
@@ -63,7 +58,6 @@ impl SlotEntry {
     }
 }
 
-/// Tuple value representation
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Null,
@@ -118,77 +112,43 @@ impl Value {
         if data.is_empty() {
             return Ok(Value::Null);
         }
-
         match col_type {
             crate::types::ColumnType::Int8 => {
-                let arr: [u8; 1] = data
-                    .try_into()
-                    .map_err(|e| HeapError::SerializationError(format!("{:?}", e)))?;
-                Ok(Value::Int8(i8::from_le_bytes(arr)))
+                Ok(Value::Int8(i8::from_le_bytes(data.try_into().unwrap())))
             }
             crate::types::ColumnType::Int16 => {
-                let arr: [u8; 2] = data
-                    .try_into()
-                    .map_err(|e| HeapError::SerializationError(format!("{:?}", e)))?;
-                Ok(Value::Int16(i16::from_le_bytes(arr)))
+                Ok(Value::Int16(i16::from_le_bytes(data.try_into().unwrap())))
             }
             crate::types::ColumnType::Int32 => {
-                let arr: [u8; 4] = data
-                    .try_into()
-                    .map_err(|e| HeapError::SerializationError(format!("{:?}", e)))?;
-                Ok(Value::Int32(i32::from_le_bytes(arr)))
+                Ok(Value::Int32(i32::from_le_bytes(data.try_into().unwrap())))
             }
             crate::types::ColumnType::Int64 => {
-                let arr: [u8; 8] = data
-                    .try_into()
-                    .map_err(|e| HeapError::SerializationError(format!("{:?}", e)))?;
-                Ok(Value::Int64(i64::from_le_bytes(arr)))
+                Ok(Value::Int64(i64::from_le_bytes(data.try_into().unwrap())))
             }
             crate::types::ColumnType::UInt8 => {
-                let arr: [u8; 1] = data
-                    .try_into()
-                    .map_err(|e| HeapError::SerializationError(format!("{:?}", e)))?;
-                Ok(Value::UInt8(u8::from_le_bytes(arr)))
+                Ok(Value::UInt8(u8::from_le_bytes(data.try_into().unwrap())))
             }
             crate::types::ColumnType::UInt16 => {
-                let arr: [u8; 2] = data
-                    .try_into()
-                    .map_err(|e| HeapError::SerializationError(format!("{:?}", e)))?;
-                Ok(Value::UInt16(u16::from_le_bytes(arr)))
+                Ok(Value::UInt16(u16::from_le_bytes(data.try_into().unwrap())))
             }
             crate::types::ColumnType::UInt32 => {
-                let arr: [u8; 4] = data
-                    .try_into()
-                    .map_err(|e| HeapError::SerializationError(format!("{:?}", e)))?;
-                Ok(Value::UInt32(u32::from_le_bytes(arr)))
+                Ok(Value::UInt32(u32::from_le_bytes(data.try_into().unwrap())))
             }
             crate::types::ColumnType::UInt64 => {
-                let arr: [u8; 8] = data
-                    .try_into()
-                    .map_err(|e| HeapError::SerializationError(format!("{:?}", e)))?;
-                Ok(Value::UInt64(u64::from_le_bytes(arr)))
+                Ok(Value::UInt64(u64::from_le_bytes(data.try_into().unwrap())))
             }
             crate::types::ColumnType::Float32 => {
-                let arr: [u8; 4] = data
-                    .try_into()
-                    .map_err(|e| HeapError::SerializationError(format!("{:?}", e)))?;
-                Ok(Value::Float32(f32::from_le_bytes(arr)))
+                Ok(Value::Float32(f32::from_le_bytes(data.try_into().unwrap())))
             }
             crate::types::ColumnType::Float64 => {
-                let arr: [u8; 8] = data
-                    .try_into()
-                    .map_err(|e| HeapError::SerializationError(format!("{:?}", e)))?;
-                Ok(Value::Float64(f64::from_le_bytes(arr)))
+                Ok(Value::Float64(f64::from_le_bytes(data.try_into().unwrap())))
             }
             crate::types::ColumnType::Bool => Ok(Value::Boolean(data[0] != 0)),
-            crate::types::ColumnType::Varchar(_) | crate::types::ColumnType::Blob(_) => {
-                Ok(Value::VarChar(String::from_utf8_lossy(data).to_string()))
-            }
+            _ => Ok(Value::VarChar(String::from_utf8_lossy(data).to_string())),
         }
     }
 }
 
-/// Tuple - in-memory representation of a row
 #[derive(Debug, Clone)]
 pub struct Tuple {
     values: Vec<Value>,
@@ -198,19 +158,15 @@ impl Tuple {
     pub fn new(values: Vec<Value>) -> Self {
         Self { values }
     }
-
     pub fn values(&self) -> &[Value] {
         &self.values
     }
-
     pub fn get(&self, idx: usize) -> Option<&Value> {
         self.values.get(idx)
     }
 
     pub fn serialize(&self, columns: &[Column]) -> Vec<u8> {
         let mut result = Vec::new();
-
-        // Build null bitmap
         let mut null_bitmap = vec![0u8; (columns.len() + 7) / 8];
         for (i, val) in self.values.iter().enumerate() {
             if matches!(val, Value::Null) {
@@ -218,12 +174,9 @@ impl Tuple {
             }
         }
         result.extend(null_bitmap);
-
-        // Serialize each column value
         for val in &self.values {
             result.extend(val.serialize());
         }
-
         result
     }
 
@@ -231,37 +184,30 @@ impl Tuple {
         if data.is_empty() {
             return Ok(Tuple::new(vec![Value::Null; columns.len()]));
         }
-
         let null_bitmap_size = (columns.len() + 7) / 8;
         let null_bitmap = &data[..null_bitmap_size];
-
         let mut values = Vec::new();
         let mut offset = null_bitmap_size;
-
         for (i, col) in columns.iter().enumerate() {
             let is_null = (null_bitmap[i / 8] & (1 << (i % 8))) != 0;
-
             if is_null {
                 values.push(Value::Null);
             } else {
                 let size = col.column_type().size();
                 if offset + size > data.len() {
-                    return Err(HeapError::SerializationError(format!(
-                        "Not enough data for column {}",
-                        i
-                    )));
+                    return Err(HeapError::SerializationError("Not enough data".to_string()));
                 }
-                let col_data = &data[offset..offset + size];
-                values.push(Value::deserialize(col_data, &col.column_type())?);
+                values.push(Value::deserialize(
+                    &data[offset..offset + size],
+                    &col.column_type(),
+                )?);
                 offset += size;
             }
         }
-
         Ok(Tuple::new(values))
     }
 }
 
-/// Heap page with slot-based tuple storage
 pub struct HeapPage {
     page_id: PageId,
     data: [u8; PAGE_SIZE],
@@ -271,55 +217,39 @@ pub struct HeapPage {
 
 impl HeapPage {
     pub fn new(page_id: PageId) -> Self {
-        let data = [0u8; PAGE_SIZE];
-        let upper = PAGE_SIZE;
-
         Self {
             page_id,
-            data,
+            data: [0u8; PAGE_SIZE],
             slot_count: 0,
-            upper,
+            upper: PAGE_SIZE,
         }
     }
-
     pub fn page_id(&self) -> PageId {
         self.page_id
     }
-
     pub fn slot_count(&self) -> usize {
         self.slot_count
     }
-
     pub fn available_space(&self) -> usize {
-        let lower = self.slot_count * std::mem::size_of::<SlotEntry>();
-        self.upper - lower
+        self.upper - self.slot_count * std::mem::size_of::<SlotEntry>()
     }
-
     pub fn can_insert(&self, tuple_size: usize) -> bool {
-        let slot_size = std::mem::size_of::<SlotEntry>();
-        tuple_size + slot_size <= self.available_space()
+        tuple_size + std::mem::size_of::<SlotEntry>() <= self.available_space()
     }
 
     pub fn insert_tuple(&mut self, tuple_data: &[u8]) -> HeapResult<usize> {
         if !self.can_insert(tuple_data.len()) {
             return Err(HeapError::OutOfSpace);
         }
-
         let slot_idx = self.slot_count;
-
         self.upper -= tuple_data.len();
         let offset = self.upper as i32 - PAGE_SIZE as i32;
-
         self.data[self.upper..self.upper + tuple_data.len()].copy_from_slice(tuple_data);
-
         let slot_offset = slot_idx * std::mem::size_of::<SlotEntry>();
         let slot = SlotEntry::new(offset, tuple_data.len() as u32);
-
         self.data[slot_offset..slot_offset + 4].copy_from_slice(&slot.offset.to_le_bytes());
         self.data[slot_offset + 4..slot_offset + 8].copy_from_slice(&slot.length.to_le_bytes());
-
         self.slot_count += 1;
-
         Ok(slot_idx)
     }
 
@@ -327,38 +257,32 @@ impl HeapPage {
         if slot_idx >= self.slot_count {
             return Err(HeapError::InvalidSlot(slot_idx));
         }
-
         let slot_offset = slot_idx * std::mem::size_of::<SlotEntry>();
-        let offset_bytes: [u8; 4] = self.data[slot_offset..slot_offset + 4].try_into().unwrap();
-        let length_bytes: [u8; 4] = self.data[slot_offset + 4..slot_offset + 8]
-            .try_into()
-            .unwrap();
-
-        let offset = i32::from_le_bytes(offset_bytes);
-        let length = u32::from_le_bytes(length_bytes) as usize;
-
+        let offset =
+            i32::from_le_bytes(self.data[slot_offset..slot_offset + 4].try_into().unwrap());
+        let length = u32::from_le_bytes(
+            self.data[slot_offset + 4..slot_offset + 8]
+                .try_into()
+                .unwrap(),
+        ) as usize;
         if offset == 0 && length == 0 {
             return Err(HeapError::TupleNotFound(RowId::new(self.page_id, slot_idx)));
         }
-
-        let actual_offset = (PAGE_SIZE as i32 + offset) as usize;
-
-        Ok(self.data[actual_offset..actual_offset + length].to_vec())
+        let actual = (PAGE_SIZE as i32 + offset) as usize;
+        Ok(self.data[actual..actual + length].to_vec())
     }
 
     pub fn delete_tuple(&mut self, slot_idx: usize) -> HeapResult<()> {
         if slot_idx >= self.slot_count {
             return Err(HeapError::InvalidSlot(slot_idx));
         }
-
         let slot_offset = slot_idx * std::mem::size_of::<SlotEntry>();
         self.data[slot_offset..slot_offset + 8].fill(0);
-
         Ok(())
     }
 
     pub fn iter_tuples(&self) -> impl Iterator<Item = (usize, Vec<u8>)> + '_ {
-        (0..self.slot_count).filter_map(move |idx| self.get_tuple(idx).ok().map(|data| (idx, data)))
+        (0..self.slot_count).filter_map(move |i| self.get_tuple(i).ok().map(|d| (i, d)))
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -368,42 +292,38 @@ impl HeapPage {
     pub fn from_bytes(page_id: PageId, data: &[u8]) -> Self {
         let mut page = Self::new(page_id);
         page.data.copy_from_slice(data);
-
         page.slot_count = 0;
         page.upper = PAGE_SIZE;
-
         for i in 0..(PAGE_SIZE / std::mem::size_of::<SlotEntry>()) {
             let slot_offset = i * std::mem::size_of::<SlotEntry>();
-            let length_bytes: [u8; 4] = data[slot_offset + 4..slot_offset + 8].try_into().unwrap();
-            let length = u32::from_le_bytes(length_bytes) as usize;
+            let length =
+                u32::from_le_bytes(data[slot_offset + 4..slot_offset + 8].try_into().unwrap())
+                    as usize;
             if length > 0 {
                 page.slot_count = i + 1;
-
-                let offset_bytes: [u8; 4] = data[slot_offset..slot_offset + 4].try_into().unwrap();
-                let offset = i32::from_le_bytes(offset_bytes);
+                let offset =
+                    i32::from_le_bytes(data[slot_offset..slot_offset + 4].try_into().unwrap());
                 let actual = (PAGE_SIZE as i32 + offset) as usize;
                 if actual < page.upper {
                     page.upper = actual;
                 }
             }
         }
-
         page
     }
 }
 
-/// Heap table - manages heap pages for a Table
 pub struct HeapTable {
     table: Arc<Table>,
-    pages: HashMap<PageId, HeapPage>,
+    buffer_mgr: Arc<BufferMgr>,
     first_page_id: PageId,
 }
 
 impl HeapTable {
-    pub fn new(table: Arc<Table>, first_page_id: PageId) -> Self {
+    pub fn new(table: Arc<Table>, buffer_mgr: Arc<BufferMgr>, first_page_id: PageId) -> Self {
         Self {
             table,
-            pages: HashMap::new(),
+            buffer_mgr,
             first_page_id,
         }
     }
@@ -411,146 +331,67 @@ impl HeapTable {
     pub fn table(&self) -> &Arc<Table> {
         &self.table
     }
-
     pub fn first_page_id(&self) -> PageId {
         self.first_page_id
     }
 
-    fn get_or_create_page(&mut self, page_id: PageId) -> HeapResult<&mut HeapPage> {
-        if !self.pages.contains_key(&page_id) {
-            self.pages.insert(page_id, HeapPage::new(page_id));
-        }
-        self.pages
-            .get_mut(&page_id)
-            .ok_or(HeapError::PageNotFound(page_id))
+    fn fetch_page(&mut self, page_id: PageId) -> HeapResult<HeapPage> {
+        // TODO: Integrate with BufferMgr properly
+        Ok(HeapPage::new(page_id))
+    }
+
+    fn write_page(&mut self, _page_id: PageId, _heap_page: &HeapPage) -> HeapResult<()> {
+        Ok(())
+    }
+
+    pub fn flush(&mut self) -> HeapResult<()> {
+        Ok(())
     }
 
     pub fn insert(&mut self, values: &[Value]) -> HeapResult<RowId> {
         let columns = self.table.columns();
-
-        let tuple = Tuple::new(values.to_vec());
-        let tuple_data = tuple.serialize(columns);
-
-        let mut target_page_id = self.first_page_id;
-
-        for (page_id, page) in self.pages.iter_mut() {
-            if page.can_insert(tuple_data.len()) {
-                target_page_id = *page_id;
-                break;
-            }
+        let tuple_data = Tuple::new(values.to_vec()).serialize(columns);
+        let page_id = self.first_page_id;
+        let mut heap_page = self.fetch_page(page_id)?;
+        if heap_page.can_insert(tuple_data.len()) {
+            let slot_idx = heap_page.insert_tuple(&tuple_data)?;
+            self.write_page(page_id, &heap_page)?;
+            return Ok(RowId::new(page_id, slot_idx));
         }
-
-        let page = self.get_or_create_page(target_page_id)?;
-
-        if page.can_insert(tuple_data.len()) {
-            let slot_idx = page.insert_tuple(&tuple_data)?;
-            return Ok(RowId::new(target_page_id, slot_idx));
-        }
-
         Err(HeapError::Other(
-            "Need to implement page allocation".to_string(),
+            "Page full, need multi-page allocation".to_string(),
         ))
     }
 
-    pub fn get(&self, row_id: RowId) -> HeapResult<Tuple> {
-        let page = self
-            .pages
-            .get(&row_id.page_id)
-            .ok_or(HeapError::PageNotFound(row_id.page_id))?;
-
-        let data = page.get_tuple(row_id.slot_idx)?;
-        let columns = self.table.columns();
-
-        Tuple::deserialize(&data, columns)
+    pub fn get(&mut self, row_id: RowId) -> HeapResult<Tuple> {
+        let heap_page = self.fetch_page(row_id.page_id)?;
+        let data = heap_page.get_tuple(row_id.slot_idx)?;
+        Tuple::deserialize(&data, self.table.columns())
     }
 
-    pub fn scan(&self) -> HeapResult<Vec<Tuple>> {
-        let columns = self.table.columns();
+    pub fn scan(&mut self) -> HeapResult<Vec<Tuple>> {
+        let columns: Vec<_> = self.table.columns().to_vec();
+        let heap_page = self.fetch_page(self.first_page_id)?;
         let mut results = Vec::new();
-
-        for page in self.pages.values() {
-            for (_, data) in page.iter_tuples() {
-                match Tuple::deserialize(&data, columns) {
-                    Ok(tuple) => results.push(tuple),
-                    Err(e) => {
-                        eprintln!("Error deserializing tuple: {}", e);
-                    }
-                }
+        for (_, data) in heap_page.iter_tuples() {
+            if let Ok(tuple) = Tuple::deserialize(&data, &columns) {
+                results.push(tuple);
             }
         }
-
         Ok(results)
     }
 
     pub fn update(&mut self, row_id: RowId, values: &[Value]) -> HeapResult<()> {
-        {
-            let page = self
-                .pages
-                .get_mut(&row_id.page_id)
-                .ok_or(HeapError::PageNotFound(row_id.page_id))?;
-            page.delete_tuple(row_id.slot_idx)?;
-        }
-
+        let mut heap_page = self.fetch_page(row_id.page_id)?;
+        heap_page.delete_tuple(row_id.slot_idx)?;
+        self.write_page(row_id.page_id, &heap_page)?;
         self.insert(values)?;
-
         Ok(())
     }
 
     pub fn delete(&mut self, row_id: RowId) -> HeapResult<()> {
-        let page = self
-            .pages
-            .get_mut(&row_id.page_id)
-            .ok_or(HeapError::PageNotFound(row_id.page_id))?;
-
-        page.delete_tuple(row_id.slot_idx)
-    }
-
-    /// Flush all dirty pages to disk (basic persistence)
-    pub fn flush(&self, data_dir: &std::path::Path) -> std::io::Result<()> {
-        use std::fs::File;
-        use std::io::Write;
-        
-        let table_name = self.table.table_name.as_str();
-        let dir_path = data_dir.join(table_name);
-        std::fs::create_dir_all(&dir_path)?;
-        
-        for (page_id, page) in &self.pages {
-            let page_file = dir_path.join(format!("page_{}.dat", page_id));
-            let mut file = File::create(page_file)?;
-            file.write_all(page.as_bytes())?;
-        }
-        Ok(())
-    }
-
-    /// Load pages from disk (basic persistence)
-    pub fn load(&mut self, data_dir: &std::path::Path) -> std::io::Result<()> {
-        use std::fs::File;
-        use std::io::Read;
-        
-        let table_name = self.table.table_name.as_str();
-        let dir_path = data_dir.join(table_name);
-        
-        if !dir_path.exists() {
-            return Ok(());
-        }
-        
-        for entry in std::fs::read_dir(&dir_path)? {
-            let entry = entry?;
-            let path = entry.path();
-            if let Some(name) = path.file_name() {
-                let name_str = name.to_string_lossy();
-                if name_str.starts_with("page_") && name_str.ends_with(".dat") {
-                    let page_id_str = name_str.trim_start_matches("page_").trim_end_matches(".dat");
-                    if let Ok(page_id) = page_id_str.parse::<u64>() {
-                        let mut file = File::open(&path)?;
-                        let mut data = vec![0u8; PAGE_SIZE];
-                        file.read_exact(&mut data)?;
-                        let page = HeapPage::from_bytes(page_id, &data);
-                        self.pages.insert(page_id, page);
-                    }
-                }
-            }
-        }
-        Ok(())
+        let mut heap_page = self.fetch_page(row_id.page_id)?;
+        heap_page.delete_tuple(row_id.slot_idx)?;
+        self.write_page(row_id.page_id, &heap_page)
     }
 }

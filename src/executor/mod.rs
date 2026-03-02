@@ -1,5 +1,4 @@
-//! Query Executor module
-
+use crate::buffer::BufferMgr;
 use crate::catalog::Catalog;
 use crate::heap::{HeapTable, Value};
 use crate::sql::{self, Statement};
@@ -39,13 +38,16 @@ impl From<sql::SqlError> for ExecError {
 pub struct Executor {
     catalog: Arc<Catalog>,
     heap_tables: std::collections::HashMap<String, HeapTable>,
+    /// Buffer pool manager for page caching
+    buffer_mgr: Arc<BufferMgr>,
 }
 
 impl Executor {
-    pub fn new(catalog: Arc<Catalog>) -> Self {
+    pub fn new(catalog: Arc<Catalog>, buffer_mgr: Arc<BufferMgr>) -> Self {
         Self {
             catalog,
             heap_tables: std::collections::HashMap::new(),
+            buffer_mgr,
         }
     }
 
@@ -78,7 +80,7 @@ impl Executor {
             .catalog
             .create_table(&ct.table_name, 1, columns)
             .map_err(|e| ExecError::Other(e.to_string()))?;
-        let heap_table = HeapTable::new(table, 1);
+        let heap_table = HeapTable::new(table, Arc::clone(&self.buffer_mgr), 1);
         self.heap_tables.insert(ct.table_name.clone(), heap_table);
         Ok(format!("Created table '{}'", ct.table_name))
     }
