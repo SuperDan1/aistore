@@ -340,7 +340,11 @@ impl HeapTable {
     }
 
     fn fetch_page(&mut self, page_id: PageId) -> HeapResult<HeapPage> {
-        Ok(self.pages.get(&page_id).cloned().unwrap_or_else(|| HeapPage::new(page_id)))
+        Ok(self
+            .pages
+            .get(&page_id)
+            .cloned()
+            .unwrap_or_else(|| HeapPage::new(page_id)))
     }
 
     fn write_page(&mut self, page_id: PageId, heap_page: &HeapPage) -> HeapResult<()> {

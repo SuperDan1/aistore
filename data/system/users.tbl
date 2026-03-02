@@ -1,4 +1,4 @@
-1|users|1|User|0|3|1772421254
-COLUMN|id|Int32|true|0
-COLUMN|name|Int32|true|1
+1|users|1|User|0|3|1772422121
+COLUMN|id|Int64|false|0
+COLUMN|name|Varchar(255)|true|1
 COLUMN|age|Int32|true|2

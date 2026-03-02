@@ -7,7 +7,6 @@ pub mod types;
 pub mod buffer;
 pub mod catalog;
 pub mod controlfile;
-pub mod executor;
 pub mod heap;
 pub mod index;
 pub mod infrastructure;
@@ -15,6 +14,7 @@ pub mod lock;
 pub mod page;
 pub mod segment;
 pub mod sql;
+pub mod storage; // Storage Engine API
 pub mod table;
 pub mod tablespace;
 pub mod vfs;
@@ -29,12 +29,12 @@ pub use vfs::VfsInterface;
 // Re-export heap items for easier access
 pub use heap::{HeapTable, RowId, Tuple, Value};
 
-// Re-export sql items
-pub use sql::{parse, Statement};
+// Re-export storage engine API
+pub use storage::{StorageEngine, StorageError, StorageResult, TableId};
 
-// Re-export executor and catalog
+// Re-export catalog and table items
 pub use catalog::Catalog;
-pub use executor::Executor;
+pub use table::Column;
 
 // Re-export buffer items
 pub use buffer::BufferMgr;

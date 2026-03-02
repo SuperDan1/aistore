@@ -1,5 +1,5 @@
-//! Aistore main program entry
-//! Simple demo to test end-to-end SQL execution
+//! Aistore storage engine demo
+//! Demonstrates the StorageEngine API
 
 // Use jemalloc as global allocator
 #[global_allocator]
@@ -8,7 +8,6 @@ static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
 mod buffer;
 mod catalog;
 mod controlfile;
-mod executor;
 mod heap;
 mod index;
 mod infrastructure;
@@ -16,82 +15,114 @@ mod lock;
 mod page;
 mod segment;
 mod sql;
+mod storage;
 mod table;
 mod tablespace;
 mod types;
 mod vfs;
 
-use buffer::BufferMgr;
-use catalog::Catalog;
-use executor::Executor;
-use std::path::PathBuf;
-use std::sync::Arc;
-use vfs::LocalFs;
+use heap::{RowId, Value};
+use storage::StorageEngine;
+use table::Column;
+use types::ColumnType;
 
 fn main() {
-    println!("Aistore storage engine starting...");
+    println!("Aistore Storage Engine Demo\n");
+    println!("============================\n");
 
-    // Setup: Create data directory
-    let data_dir = PathBuf::from("./data");
-    std::fs::create_dir_all(&data_dir).expect("Failed to create data dir");
+    // Create storage engine
+    let mut engine = StorageEngine::new("./data").expect("Failed to create storage engine");
 
-    // 1. Create VFS
-    let vfs = Arc::new(LocalFs::new());
+    // Create table
+    let columns = vec![
+        Column::new("id".into(), ColumnType::Int64, false, 0),
+        Column::new("name".into(), ColumnType::Varchar(255), true, 1),
+        Column::new("age".into(), ColumnType::Int32, true, 2),
+    ];
 
-    // 2. Create large BufferPool (no eviction needed for demo)
-    // 10000 pages * 8KB = 80MB buffer pool
-    let buffer_mgr = Arc::new(BufferMgr::init(10000, vfs.clone(), data_dir.clone()));
+    let table_id = engine
+        .create_table("users", columns)
+        .expect("Failed to create table");
+    println!("Created table 'users' with id: {}", table_id);
 
-    // 3. Create Catalog
-    let catalog = Arc::new(Catalog::new(&data_dir).expect("Failed to create catalog"));
+    // Insert rows
+    println!("\n--- Inserting rows ---");
 
-    // 4. Create Executor with BufferPool
-    let mut executor = Executor::new(catalog, buffer_mgr);
+    let row1 = vec![
+        Value::Int64(1),
+        Value::VarChar("Alice".into()),
+        Value::Int32(30),
+    ];
+    let id1 = engine.insert("users", row1).expect("Failed to insert");
+    println!(
+        "Inserted row 1: page_id={}, slot_idx={}",
+        id1.page_id, id1.slot_idx
+    );
 
-    // 5. Execute SQL statements
-    println!("\n=== SQL Execution Demo ===\n");
+    let row2 = vec![
+        Value::Int64(2),
+        Value::VarChar("Bob".into()),
+        Value::Int32(25),
+    ];
+    let id2 = engine.insert("users", row2).expect("Failed to insert");
+    println!(
+        "Inserted row 2: page_id={}, slot_idx={}",
+        id2.page_id, id2.slot_idx
+    );
 
-    // CREATE TABLE
-    let result = executor.execute("CREATE TABLE users (id INT, name VARCHAR, age INT)");
-    println!("CREATE TABLE: {:?}", result);
+    let row3 = vec![
+        Value::Int64(3),
+        Value::VarChar("Charlie".into()),
+        Value::Int32(35),
+    ];
+    let id3 = engine.insert("users", row3).expect("Failed to insert");
+    println!(
+        "Inserted row 3: page_id={}, slot_idx={}",
+        id3.page_id, id3.slot_idx
+    );
 
-    // INSERT
-    let result = executor.execute("INSERT INTO users VALUES (1, 'Alice', 30)");
-    println!("INSERT: {:?}", result);
+    // Scan all rows
+    println!("\n--- Scanning all rows ---");
+    let rows = engine.scan("users").expect("Failed to scan");
+    println!("Found {} rows:", rows.len());
+    for row in &rows {
+        let vals: Vec<String> = row.values().iter().map(|v| format!("{:?}", v)).collect();
+        println!("  {:?}", vals);
+    }
 
-    let result = executor.execute("INSERT INTO users VALUES (2, 'Bob', 25)");
-    println!("INSERT: {:?}", result);
+    // Update a row
+    println!("\n--- Updating row 1 ---");
+    let new_row1 = vec![
+        Value::Int64(1),
+        Value::VarChar("Alice Smith".into()),
+        Value::Int32(31),
+    ];
+    engine
+        .update("users", id1, new_row1)
+        .expect("Failed to update");
+    println!("Updated row 1");
 
-    let result = executor.execute("INSERT INTO users VALUES (3, 'Charlie', 35)");
-    println!("INSERT: {:?}", result);
+    // Scan again
+    println!("\n--- Scanning after update ---");
+    let rows = engine.scan("users").expect("Failed to scan");
+    for row in &rows {
+        let vals: Vec<String> = row.values().iter().map(|v| format!("{:?}", v)).collect();
+        println!("  {:?}", vals);
+    }
 
-    // SELECT
-    let result = executor.execute("SELECT name, age FROM users");
-    println!("\nSELECT all:");
-    println!("{}", result.unwrap_or_else(|e| format!("Error: {:?}", e)));
+    // Delete a row
+    println!("\n--- Deleting row 2 ---");
+    engine.delete("users", id2).expect("Failed to delete");
+    println!("Deleted row 2");
 
-    // SELECT with WHERE
-    let result = executor.execute("SELECT name, age FROM users WHERE age > 28");
-    println!("\nSELECT WHERE age > 28:");
-    println!("{}", result.unwrap_or_else(|e| format!("Error: {:?}", e)));
-
-    // UPDATE
-    let result = executor.execute("UPDATE users SET age = 31 WHERE name = 'Alice'");
-    println!("\nUPDATE: {:?}", result);
-
-    // SELECT after UPDATE
-    let result = executor.execute("SELECT name, age FROM users WHERE name = 'Alice'");
-    println!("\nSELECT after UPDATE:");
-    println!("{}", result.unwrap_or_else(|e| format!("Error: {:?}", e)));
-
-    // DELETE
-    let result = executor.execute("DELETE FROM users WHERE name = 'Bob'");
-    println!("\nDELETE: {:?}", result);
-
-    // SELECT after DELETE
-    let result = executor.execute("SELECT name, age FROM users");
-    println!("\nSELECT after DELETE:");
-    println!("{}", result.unwrap_or_else(|e| format!("Error: {:?}", e)));
+    // Final scan
+    println!("\n--- Final scan ---");
+    let rows = engine.scan("users").expect("Failed to scan");
+    println!("{} rows remaining:", rows.len());
+    for row in &rows {
+        let vals: Vec<String> = row.values().iter().map(|v| format!("{:?}", v)).collect();
+        println!("  {:?}", vals);
+    }
 
     println!("\n=== Demo Complete ===");
 }
