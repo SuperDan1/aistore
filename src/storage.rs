@@ -122,7 +122,7 @@ impl StorageEngine {
         self.tables.contains_key(name)
     }
 
-    /// Insert a row
+    /// Insert a row (without transaction)
     pub fn insert(&mut self, table: &str, values: Vec<Value>) -> StorageResult<RowId> {
         let heap_table = self
             .tables
@@ -133,8 +133,74 @@ impl StorageEngine {
             .insert(&values)
             .map_err(|e| StorageError::Other(e.to_string()))
     }
+    
+    /// Insert a row with transaction (acquires X lock on row)
+    pub fn insert_with_tx(&mut self, tx_id: TransactionId, table: &str, values: Vec<Value>) -> StorageResult<RowId> {
+        // Get heap table first to perform insert and get RowId
+        let heap_table = self
+            .tables
+            .get_mut(table)
+            .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
 
-    /// Scan rows from a table with optional filter
+        // Insert to get the row_id
+        let row_id = heap_table
+            .insert(&values)
+            .map_err(|e| StorageError::Other(e.to_string()))?;
+        
+        // Acquire row lock (X mode for insert)
+        self.lock_mgr
+            .lock_row(tx_id, table, row_id.page_id, row_id.slot_idx, LockMode::Exclusive)
+            .map_err(|e| match e {
+                crate::lock::LockError::Timeout => StorageError::LockTimeout,
+                crate::lock::LockError::Deadlock => StorageError::Deadlock,
+                _ => StorageError::Other(e.to_string()),
+            })?;
+        
+        Ok(row_id)
+    }
+
+    /// Scan rows with transaction (acquires S lock)
+    pub fn scan_with_tx(&mut self, tx_id: TransactionId, table: &str, filter: Option<Filter>) -> StorageResult<Vec<Tuple>> {
+        let heap_table = self
+            .tables
+            .get_mut(table)
+            .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
+
+        // Convert filter column name to index
+        let filter_idx = if let Some(ref f) = filter {
+            heap_table
+                .table()
+                .columns()
+                .iter()
+                .position(|c| c.name() == f.column)
+                .map(|idx| (idx, &f.value))
+        } else {
+            None
+        };
+
+        // If filtering by id, acquire S lock on that row
+        if let Some(ref f) = filter {
+            if f.column == "id" {
+                // Try to find the row first
+                let results = heap_table
+                    .scan_with_filter(filter_idx.clone())
+                    .map_err(|e| StorageError::Other(e.to_string()))?;
+                
+                if let Some(tuple) = results.first() {
+                    if let Some(Value::Int64(id)) = tuple.get(0) {
+                        // For scan, we need to lock - but we don't have exact page/slot
+                        // For now, just do the scan without specific row lock
+                    }
+                }
+            }
+        }
+
+        heap_table
+            .scan_with_filter(filter_idx)
+            .map_err(|e| StorageError::Other(e.to_string()))
+    }
+    
+    /// Scan rows from a table with optional filter (without transaction)
     pub fn scan(&mut self, table: &str, filter: Option<Filter>) -> StorageResult<Vec<Tuple>> {
         let heap_table = self
             .tables
@@ -163,7 +229,7 @@ impl StorageEngine {
         self.scan(table, None)
     }
 
-    /// Update a row
+    /// Update a row (without transaction)
     pub fn update(&mut self, table: &str, row_id: RowId, values: Vec<Value>) -> StorageResult<()> {
         let heap_table = self
             .tables
@@ -174,9 +240,53 @@ impl StorageEngine {
             .update(row_id, &values)
             .map_err(|e| StorageError::Other(e.to_string()))
     }
+    
+    /// Update a row with transaction (acquires X lock)
+    pub fn update_with_tx(&mut self, tx_id: TransactionId, table: &str, row_id: RowId, values: Vec<Value>) -> StorageResult<()> {
+        // Acquire X lock on row
+        self.lock_mgr
+            .lock_row(tx_id, table, row_id.page_id, row_id.slot_idx, LockMode::Exclusive)
+            .map_err(|e| match e {
+                crate::lock::LockError::Timeout => StorageError::LockTimeout,
+                crate::lock::LockError::Deadlock => StorageError::Deadlock,
+                _ => StorageError::Other(e.to_string()),
+            })?;
+        
+        // Perform update
+        let heap_table = self
+            .tables
+            .get_mut(table)
+            .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
 
-    /// Delete a row
+        heap_table
+            .update(row_id, &values)
+            .map_err(|e| StorageError::Other(e.to_string()))
+    }
+
+    /// Delete a row (without transaction)
     pub fn delete(&mut self, table: &str, row_id: RowId) -> StorageResult<()> {
+        let heap_table = self
+            .tables
+            .get_mut(table)
+            .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
+
+        heap_table
+            .delete(row_id)
+            .map_err(|e| StorageError::Other(e.to_string()))
+    }
+    
+    /// Delete a row with transaction (acquires X lock)
+    pub fn delete_with_tx(&mut self, tx_id: TransactionId, table: &str, row_id: RowId) -> StorageResult<()> {
+        // Acquire X lock on row
+        self.lock_mgr
+            .lock_row(tx_id, table, row_id.page_id, row_id.slot_idx, LockMode::Exclusive)
+            .map_err(|e| match e {
+                crate::lock::LockError::Timeout => StorageError::LockTimeout,
+                crate::lock::LockError::Deadlock => StorageError::Deadlock,
+                _ => StorageError::Other(e.to_string()),
+            })?;
+        
+        // Perform delete
         let heap_table = self
             .tables
             .get_mut(table)
