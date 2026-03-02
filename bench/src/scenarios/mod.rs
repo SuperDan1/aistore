@@ -6,8 +6,6 @@ use rand::Rng;
 use std::error::Error;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-
-
 /// Scenario trait - defines a benchmark scenario
 pub trait Scenario: Send + Sync {
     /// Prepare scenario (create tables, pre-populate data)
@@ -73,7 +71,7 @@ impl Scenario for PointSelect {
     fn table_name(&self) -> &str {
         &self.table_name
     }
-        }
+}
 
 /// Read only scenario - simple SELECT
 
@@ -171,8 +169,7 @@ impl Scenario for ReadWrite {
                 if *tid == id {
                     let row_id = RowId::new(
                         // Simplified - in real impl we'd track row_ids properly
-                        idx as u64,
-                        idx,
+                        idx as u64, idx,
                     );
                     let _ = storage.update(&self.table_name, row_id, values.clone());
                     break;
@@ -541,7 +538,7 @@ impl Scenario for BulkInsert {
 
         for i in 0..self.batch_size {
             let id = start_id + i as u64;
-        let k = rng.r#gen::<i64>();
+            let k = rng.r#gen::<i64>();
             let values = vec![
                 Value::Int64(id as i64),
                 Value::Int64(k),
