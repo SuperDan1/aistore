@@ -1,0 +1,4 @@
+1|users|1|User|0|3|1772420152
+COLUMN|id|Int32|true|0
+COLUMN|name|Int32|true|1
+COLUMN|age|Int32|true|2
