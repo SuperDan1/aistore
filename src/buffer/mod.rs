@@ -4,6 +4,11 @@
 //! and VFS-based disk I/O.
 
 pub mod lru;
+pub mod flusher;
+pub mod double_write;
+
+pub use flusher::{FlushPolicy, PageFlusher};
+pub use double_write::DoubleWriteBuffer;
 
 use crate::infrastructure::hash::fnv1a_hash;
 use crate::page::Page;
