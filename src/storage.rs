@@ -12,6 +12,15 @@ use std::sync::Arc;
 /// Table ID type
 pub type TableId = u64;
 
+/// Filter condition for scan operations
+#[derive(Debug, Clone)]
+pub struct Filter {
+    /// Column name to filter on
+    pub column: String,
+    /// Value to match
+    pub value: Value,
+}
+
 /// Storage engine error
 #[derive(Debug)]
 pub enum StorageError {
@@ -111,16 +120,33 @@ impl StorageEngine {
             .map_err(|e| StorageError::Other(e.to_string()))
     }
 
-    /// Scan all rows from a table
-    pub fn scan(&mut self, table: &str) -> StorageResult<Vec<Tuple>> {
+    /// Scan rows from a table with optional filter
+    pub fn scan(&mut self, table: &str, filter: Option<Filter>) -> StorageResult<Vec<Tuple>> {
         let heap_table = self
             .tables
             .get_mut(table)
             .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
 
+        // Convert filter column name to index
+        let filter_idx = if let Some(ref f) = filter {
+            heap_table
+                .table()
+                .columns()
+                .iter()
+                .position(|c| c.name() == f.column)
+                .map(|idx| (idx, &f.value))
+        } else {
+            None
+        };
+
         heap_table
-            .scan()
+            .scan(filter_idx)
             .map_err(|e| StorageError::Other(e.to_string()))
+    }
+
+    /// Scan all rows from a table (convenience method)
+    pub fn scan_all(&mut self, table: &str) -> StorageResult<Vec<Tuple>> {
+        self.scan(table, None)
     }
 
     /// Update a row

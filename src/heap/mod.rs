@@ -377,13 +377,25 @@ impl HeapTable {
         Tuple::deserialize(&data, self.table.columns())
     }
 
-    pub fn scan(&mut self) -> HeapResult<Vec<Tuple>> {
+    /// Scan rows with optional filter
+    pub fn scan(&mut self, filter: Option<(usize, &Value)>) -> HeapResult<Vec<Tuple>> {
         let columns: Vec<_> = self.table.columns().to_vec();
         let heap_page = self.fetch_page(self.first_page_id)?;
         let mut results = Vec::new();
         for (_, data) in heap_page.iter_tuples() {
             if let Ok(tuple) = Tuple::deserialize(&data, &columns) {
-                results.push(tuple);
+                // Apply filter if provided
+                let mut matches = true;
+                if let Some((col_idx, filter_value)) = filter {
+                    if let Some(tuple_val) = tuple.get(col_idx) {
+                        matches = tuple_val == filter_value;
+                    } else {
+                        matches = false;
+                    }
+                }
+                if matches {
+                    results.push(tuple);
+                }
             }
         }
         Ok(results)

@@ -30,7 +30,7 @@ pub use vfs::VfsInterface;
 pub use heap::{HeapTable, RowId, Tuple, Value};
 
 // Re-export storage engine API
-pub use storage::{StorageEngine, StorageError, StorageResult, TableId};
+pub use storage::{Filter, StorageEngine, StorageError, StorageResult, TableId};
 
 // Re-export catalog and table items
 pub use catalog::Catalog;

@@ -1,10 +1,12 @@
 //! Benchmark scenarios module
 
-use aistore::heap::{RowId, Tuple, Value};
-use aistore::storage::StorageEngine;
+use aistore::heap::{RowId, Value};
+use aistore::storage::{Filter, StorageEngine};
 use rand::Rng;
 use std::error::Error;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+
 
 /// Scenario trait - defines a benchmark scenario
 pub trait Scenario: Send + Sync {
@@ -59,22 +61,21 @@ impl Scenario for PointSelect {
         rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
         let id = rng.gen_range(1..=self.rows.min(100)) as i64;
-        // For point select, we scan and filter
-        let tuples = storage.scan(&self.table_name)?;
-        for tuple in tuples {
-            if let Some(Value::Int64(tid)) = tuple.get(0) {
-                if *tid == id {
-                    break;
-                }
-            }
-        }
+        // Use filter to get matching rows directly
+        let filter = Filter {
+            column: "id".to_string(),
+            value: Value::Int64(id),
+        };
+        let _tuples = storage.scan(&self.table_name, Some(filter))?;
         Ok(())
     }
 
     fn table_name(&self) -> &str {
         &self.table_name
     }
-}
+        }
+
+/// Read only scenario - simple SELECT
 
 /// Read only scenario - simple SELECT
 pub struct ReadOnly {
@@ -108,7 +109,7 @@ impl Scenario for ReadOnly {
         storage: &mut StorageEngine,
         _rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
-        let _tuples = storage.scan(&self.table_name)?;
+        let _tuples = storage.scan(&self.table_name, None)?;
         Ok(())
     }
 
@@ -152,7 +153,7 @@ impl Scenario for ReadWrite {
         rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
         // Read
-        let _tuples = storage.scan(&self.table_name)?;
+        let _tuples = storage.scan(&self.table_name, None)?;
 
         // Update
         let id = rng.gen_range(1..=self.rows.min(100)) as i64;
@@ -164,7 +165,7 @@ impl Scenario for ReadWrite {
         ];
         // Note: StorageEngine doesn't have direct row update by RowId
         // We need to scan to find the row
-        let tuples = storage.scan(&self.table_name)?;
+        let tuples = storage.scan(&self.table_name, None)?;
         for (idx, tuple) in tuples.iter().enumerate() {
             if let Some(Value::Int64(tid)) = tuple.get(0) {
                 if *tid == id {
@@ -235,7 +236,7 @@ impl Scenario for WriteOnly {
 
         // Update
         let update_id = rng.gen_range(1..=self.rows.min(100) as i64);
-        let tuples = storage.scan(&self.table_name)?;
+        let tuples = storage.scan(&self.table_name, None)?;
         for (idx, tuple) in tuples.iter().enumerate() {
             if let Some(Value::Int64(tid)) = tuple.get(0) {
                 if *tid == update_id {
@@ -299,7 +300,7 @@ impl Scenario for UpdateIndex {
         let id = rng.gen_range(1..=self.rows.min(100)) as i64;
         let k = rng.r#gen::<i64>();
 
-        let tuples = storage.scan(&self.table_name)?;
+        let tuples = storage.scan(&self.table_name, None)?;
         for (idx, tuple) in tuples.iter().enumerate() {
             if let Some(Value::Int64(tid)) = tuple.get(0) {
                 if *tid == id {
@@ -362,7 +363,7 @@ impl Scenario for UpdateNonIndex {
     ) -> Result<(), Box<dyn Error>> {
         let id = rng.gen_range(1..=self.rows.min(100)) as i64;
 
-        let tuples = storage.scan(&self.table_name)?;
+        let tuples = storage.scan(&self.table_name, None)?;
         for (idx, tuple) in tuples.iter().enumerate() {
             if let Some(Value::Int64(tid)) = tuple.get(0) {
                 if *tid == id {
@@ -479,7 +480,7 @@ impl Scenario for Delete {
         let id = self.next_delete_id.fetch_add(1, Ordering::Relaxed);
         if id <= self.rows.min(100) as u64 {
             // Delete requires scanning and finding the row
-            let tuples = storage.scan(&self.table_name)?;
+            let tuples = storage.scan(&self.table_name, None)?;
             for (idx, tuple) in tuples.iter().enumerate() {
                 if let Some(Value::Int64(tid)) = tuple.get(0) {
                     if *tid == id as i64 {
