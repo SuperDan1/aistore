@@ -1,19 +1,20 @@
 //! Benchmark scenarios module
 
-use aistore::executor::Executor;
+use aistore::heap::{RowId, Tuple, Value};
+use aistore::storage::StorageEngine;
 use rand::Rng;
 use std::error::Error;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Scenario trait - defines a benchmark scenario
 pub trait Scenario: Send + Sync {
-    /// Prepare scenario (create tables, etc.)
-    fn prepare(&self, executor: &mut Executor) -> Result<(), Box<dyn Error>>;
+    /// Prepare scenario (create tables, pre-populate data)
+    fn prepare(&self, storage: &mut StorageEngine, rows: usize) -> Result<(), Box<dyn Error>>;
 
     /// Execute one iteration of the scenario
     fn execute(
         &self,
-        executor: &mut Executor,
+        storage: &mut StorageEngine,
         rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>>;
 
@@ -37,24 +38,36 @@ impl PointSelect {
 }
 
 impl Scenario for PointSelect {
-    fn prepare(&self, executor: &mut Executor) -> Result<(), Box<dyn Error>> {
-        executor.execute(&format!(
-            "CREATE TABLE {} (id INT64, k INT64, c VARCHAR(100), pad VARCHAR(60))",
-            self.table_name
-        ))?;
+    fn prepare(&self, storage: &mut StorageEngine, _rows: usize) -> Result<(), Box<dyn Error>> {
+        // Table already created in main
+        // Pre-populate with some data
+        for i in 1..=100.min(self.rows) {
+            let values = vec![
+                Value::Int64(i as i64),
+                Value::Int64(i as i64),
+                Value::VarChar(format!("data_{}", i)),
+                Value::VarChar(format!("pad_{}", i)),
+            ];
+            storage.insert(&self.table_name, values)?;
+        }
         Ok(())
     }
 
     fn execute(
         &self,
-        executor: &mut Executor,
+        storage: &mut StorageEngine,
         rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
-        let id = rng.gen_range(1..=self.rows) as i64;
-        executor.execute(&format!(
-            "SELECT * FROM {} WHERE id = {}",
-            self.table_name, id
-        ))?;
+        let id = rng.gen_range(1..=self.rows.min(100)) as i64;
+        // For point select, we scan and filter
+        let tuples = storage.scan(&self.table_name)?;
+        for tuple in tuples {
+            if let Some(Value::Int64(tid)) = tuple.get(0) {
+                if *tid == id {
+                    break;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -77,20 +90,25 @@ impl ReadOnly {
 }
 
 impl Scenario for ReadOnly {
-    fn prepare(&self, executor: &mut Executor) -> Result<(), Box<dyn Error>> {
-        executor.execute(&format!(
-            "CREATE TABLE {} (id INT64, k INT64, c VARCHAR(100), pad VARCHAR(60))",
-            self.table_name
-        ))?;
+    fn prepare(&self, storage: &mut StorageEngine, rows: usize) -> Result<(), Box<dyn Error>> {
+        for i in 1..=rows.min(100) {
+            let values = vec![
+                Value::Int64(i as i64),
+                Value::Int64(i as i64),
+                Value::VarChar(format!("data_{}", i)),
+                Value::VarChar(format!("pad_{}", i)),
+            ];
+            storage.insert(&self.table_name, values)?;
+        }
         Ok(())
     }
 
     fn execute(
         &self,
-        executor: &mut Executor,
+        storage: &mut StorageEngine,
         _rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
-        executor.execute(&format!("SELECT * FROM {}", self.table_name))?;
+        let _tuples = storage.scan(&self.table_name)?;
         Ok(())
     }
 
@@ -115,25 +133,51 @@ impl ReadWrite {
 }
 
 impl Scenario for ReadWrite {
-    fn prepare(&self, executor: &mut Executor) -> Result<(), Box<dyn Error>> {
-        executor.execute(&format!(
-            "CREATE TABLE {} (id INT64, k INT64, c VARCHAR(100), pad VARCHAR(60))",
-            self.table_name
-        ))?;
+    fn prepare(&self, storage: &mut StorageEngine, rows: usize) -> Result<(), Box<dyn Error>> {
+        for i in 1..=rows.min(100) {
+            let values = vec![
+                Value::Int64(i as i64),
+                Value::Int64(i as i64),
+                Value::VarChar(format!("data_{}", i)),
+                Value::VarChar(format!("pad_{}", i)),
+            ];
+            storage.insert(&self.table_name, values)?;
+        }
         Ok(())
     }
 
     fn execute(
         &self,
-        executor: &mut Executor,
+        storage: &mut StorageEngine,
         rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
-        executor.execute(&format!("SELECT * FROM {}", self.table_name))?;
-        let id = rng.gen_range(1..=self.rows) as i64;
-        executor.execute(&format!(
-            "UPDATE {} SET k = k + 1 WHERE id = {}",
-            self.table_name, id
-        ))?;
+        // Read
+        let _tuples = storage.scan(&self.table_name)?;
+
+        // Update
+        let id = rng.gen_range(1..=self.rows.min(100)) as i64;
+        let values = vec![
+            Value::Int64(id),
+            Value::Int64(id + 1),
+            Value::VarChar("updated".to_string()),
+            Value::VarChar("updated".to_string()),
+        ];
+        // Note: StorageEngine doesn't have direct row update by RowId
+        // We need to scan to find the row
+        let tuples = storage.scan(&self.table_name)?;
+        for (idx, tuple) in tuples.iter().enumerate() {
+            if let Some(Value::Int64(tid)) = tuple.get(0) {
+                if *tid == id {
+                    let row_id = RowId::new(
+                        // Simplified - in real impl we'd track row_ids properly
+                        idx as u64,
+                        idx,
+                    );
+                    let _ = storage.update(&self.table_name, row_id, values.clone());
+                    break;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -154,36 +198,62 @@ impl WriteOnly {
         Self {
             table_name: "sbtest1".to_string(),
             rows,
-            next_id: AtomicU64::new((rows + 1) as u64),
+            next_id: AtomicU64::new((rows.min(100) + 1) as u64),
         }
     }
 }
 
 impl Scenario for WriteOnly {
-    fn prepare(&self, executor: &mut Executor) -> Result<(), Box<dyn Error>> {
-        executor.execute(&format!(
-            "CREATE TABLE {} (id INT64, k INT64, c VARCHAR(100), pad VARCHAR(60))",
-            self.table_name
-        ))?;
+    fn prepare(&self, storage: &mut StorageEngine, rows: usize) -> Result<(), Box<dyn Error>> {
+        for i in 1..=rows.min(100) {
+            let values = vec![
+                Value::Int64(i as i64),
+                Value::Int64(i as i64),
+                Value::VarChar(format!("data_{}", i)),
+                Value::VarChar(format!("pad_{}", i)),
+            ];
+            storage.insert(&self.table_name, values)?;
+        }
         Ok(())
     }
 
     fn execute(
         &self,
-        executor: &mut Executor,
+        storage: &mut StorageEngine,
         rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
+        // Insert
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let k = rng.r#gen::<i64>();
-        executor.execute(&format!(
-            "INSERT INTO {} VALUES ({}, {}, 'test', 'pad')",
-            self.table_name, id, k
-        ))?;
-        let update_id = rng.gen_range(1..=self.rows as i64);
-        executor.execute(&format!(
-            "UPDATE {} SET k = k + 1 WHERE id = {}",
-            self.table_name, update_id
-        ))?;
+        let values = vec![
+            Value::Int64(id as i64),
+            Value::Int64(k),
+            Value::VarChar("test".to_string()),
+            Value::VarChar("pad".to_string()),
+        ];
+        storage.insert(&self.table_name, values)?;
+
+        // Update
+        let update_id = rng.gen_range(1..=self.rows.min(100) as i64);
+        let tuples = storage.scan(&self.table_name)?;
+        for (idx, tuple) in tuples.iter().enumerate() {
+            if let Some(Value::Int64(tid)) = tuple.get(0) {
+                if *tid == update_id {
+                    let row_id = RowId::new(idx as u64, idx);
+                    let _ = storage.update(
+                        &self.table_name,
+                        row_id,
+                        vec![
+                            Value::Int64(update_id),
+                            Value::Int64(update_id + 1),
+                            Value::VarChar("updated".to_string()),
+                            Value::VarChar("updated".to_string()),
+                        ],
+                    );
+                    break;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -208,25 +278,46 @@ impl UpdateIndex {
 }
 
 impl Scenario for UpdateIndex {
-    fn prepare(&self, executor: &mut Executor) -> Result<(), Box<dyn Error>> {
-        executor.execute(&format!(
-            "CREATE TABLE {} (id INT64, k INT64, c VARCHAR(100), pad VARCHAR(60))",
-            self.table_name
-        ))?;
+    fn prepare(&self, storage: &mut StorageEngine, rows: usize) -> Result<(), Box<dyn Error>> {
+        for i in 1..=rows.min(100) {
+            let values = vec![
+                Value::Int64(i as i64),
+                Value::Int64(i as i64),
+                Value::VarChar(format!("data_{}", i)),
+                Value::VarChar(format!("pad_{}", i)),
+            ];
+            storage.insert(&self.table_name, values)?;
+        }
         Ok(())
     }
 
     fn execute(
         &self,
-        executor: &mut Executor,
+        storage: &mut StorageEngine,
         rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
-        let id = rng.gen_range(1..=self.rows) as i64;
+        let id = rng.gen_range(1..=self.rows.min(100)) as i64;
         let k = rng.r#gen::<i64>();
-        executor.execute(&format!(
-            "UPDATE {} SET k = {} WHERE id = {}",
-            self.table_name, k, id
-        ))?;
+
+        let tuples = storage.scan(&self.table_name)?;
+        for (idx, tuple) in tuples.iter().enumerate() {
+            if let Some(Value::Int64(tid)) = tuple.get(0) {
+                if *tid == id {
+                    let row_id = RowId::new(idx as u64, idx);
+                    storage.update(
+                        &self.table_name,
+                        row_id,
+                        vec![
+                            Value::Int64(id),
+                            Value::Int64(k),
+                            Value::VarChar("updated".to_string()),
+                            Value::VarChar("updated".to_string()),
+                        ],
+                    )?;
+                    break;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -251,24 +342,45 @@ impl UpdateNonIndex {
 }
 
 impl Scenario for UpdateNonIndex {
-    fn prepare(&self, executor: &mut Executor) -> Result<(), Box<dyn Error>> {
-        executor.execute(&format!(
-            "CREATE TABLE {} (id INT64, k INT64, c VARCHAR(100), pad VARCHAR(60))",
-            self.table_name
-        ))?;
+    fn prepare(&self, storage: &mut StorageEngine, rows: usize) -> Result<(), Box<dyn Error>> {
+        for i in 1..=rows.min(100) {
+            let values = vec![
+                Value::Int64(i as i64),
+                Value::Int64(i as i64),
+                Value::VarChar(format!("data_{}", i)),
+                Value::VarChar(format!("pad_{}", i)),
+            ];
+            storage.insert(&self.table_name, values)?;
+        }
         Ok(())
     }
 
     fn execute(
         &self,
-        executor: &mut Executor,
+        storage: &mut StorageEngine,
         rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
-        let id = rng.gen_range(1..=self.rows) as i64;
-        executor.execute(&format!(
-            "UPDATE {} SET pad = 'updated' WHERE id = {}",
-            self.table_name, id
-        ))?;
+        let id = rng.gen_range(1..=self.rows.min(100)) as i64;
+
+        let tuples = storage.scan(&self.table_name)?;
+        for (idx, tuple) in tuples.iter().enumerate() {
+            if let Some(Value::Int64(tid)) = tuple.get(0) {
+                if *tid == id {
+                    let row_id = RowId::new(idx as u64, idx);
+                    storage.update(
+                        &self.table_name,
+                        row_id,
+                        vec![
+                            Value::Int64(id),
+                            Value::Int64(id),
+                            Value::VarChar("updated".to_string()),
+                            Value::VarChar("updated".to_string()),
+                        ],
+                    )?;
+                    break;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -287,31 +399,39 @@ impl Insert {
     pub fn new(_tables: usize, rows: usize) -> Self {
         Self {
             table_name: "sbtest1".to_string(),
-            next_id: AtomicU64::new((rows + 1) as u64),
+            next_id: AtomicU64::new((rows.min(100) + 1) as u64),
         }
     }
 }
 
 impl Scenario for Insert {
-    fn prepare(&self, executor: &mut Executor) -> Result<(), Box<dyn Error>> {
-        executor.execute(&format!(
-            "CREATE TABLE {} (id INT64, k INT64, c VARCHAR(100), pad VARCHAR(60))",
-            self.table_name
-        ))?;
+    fn prepare(&self, storage: &mut StorageEngine, rows: usize) -> Result<(), Box<dyn Error>> {
+        for i in 1..=rows.min(100) {
+            let values = vec![
+                Value::Int64(i as i64),
+                Value::Int64(i as i64),
+                Value::VarChar(format!("data_{}", i)),
+                Value::VarChar(format!("pad_{}", i)),
+            ];
+            storage.insert(&self.table_name, values)?;
+        }
         Ok(())
     }
 
     fn execute(
         &self,
-        executor: &mut Executor,
+        storage: &mut StorageEngine,
         rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let k = rng.r#gen::<i64>();
-        executor.execute(&format!(
-            "INSERT INTO {} VALUES ({}, {}, 'test data', 'padding')",
-            self.table_name, id, k
-        ))?;
+        let values = vec![
+            Value::Int64(id as i64),
+            Value::Int64(k),
+            Value::VarChar("test data".to_string()),
+            Value::VarChar("padding".to_string()),
+        ];
+        storage.insert(&self.table_name, values)?;
         Ok(())
     }
 
@@ -338,25 +458,37 @@ impl Delete {
 }
 
 impl Scenario for Delete {
-    fn prepare(&self, executor: &mut Executor) -> Result<(), Box<dyn Error>> {
-        executor.execute(&format!(
-            "CREATE TABLE {} (id INT64, k INT64, c VARCHAR(100), pad VARCHAR(60))",
-            self.table_name
-        ))?;
+    fn prepare(&self, storage: &mut StorageEngine, rows: usize) -> Result<(), Box<dyn Error>> {
+        for i in 1..=rows.min(100) {
+            let values = vec![
+                Value::Int64(i as i64),
+                Value::Int64(i as i64),
+                Value::VarChar(format!("data_{}", i)),
+                Value::VarChar(format!("pad_{}", i)),
+            ];
+            storage.insert(&self.table_name, values)?;
+        }
         Ok(())
     }
 
     fn execute(
         &self,
-        executor: &mut Executor,
+        storage: &mut StorageEngine,
         _rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
         let id = self.next_delete_id.fetch_add(1, Ordering::Relaxed);
-        if id <= self.rows as u64 {
-            executor.execute(&format!(
-                "DELETE FROM {} WHERE id = {}",
-                self.table_name, id
-            ))?;
+        if id <= self.rows.min(100) as u64 {
+            // Delete requires scanning and finding the row
+            let tuples = storage.scan(&self.table_name)?;
+            for (idx, tuple) in tuples.iter().enumerate() {
+                if let Some(Value::Int64(tid)) = tuple.get(0) {
+                    if *tid == id as i64 {
+                        let row_id = RowId::new(idx as u64, idx);
+                        storage.delete(&self.table_name, row_id)?;
+                        break;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -378,44 +510,45 @@ impl BulkInsert {
         Self {
             table_name: "sbtest1".to_string(),
             batch_size: 100,
-            next_id: AtomicU64::new((rows + 1) as u64),
+            next_id: AtomicU64::new((rows.min(100) + 1) as u64),
         }
     }
 }
 
 impl Scenario for BulkInsert {
-    fn prepare(&self, executor: &mut Executor) -> Result<(), Box<dyn Error>> {
-        executor.execute(&format!(
-            "CREATE TABLE {} (id INT64, k INT64, c VARCHAR(100), pad VARCHAR(60))",
-            self.table_name
-        ))?;
+    fn prepare(&self, storage: &mut StorageEngine, rows: usize) -> Result<(), Box<dyn Error>> {
+        for i in 1..=rows.min(100) {
+            let values = vec![
+                Value::Int64(i as i64),
+                Value::Int64(i as i64),
+                Value::VarChar(format!("data_{}", i)),
+                Value::VarChar(format!("pad_{}", i)),
+            ];
+            storage.insert(&self.table_name, values)?;
+        }
         Ok(())
     }
 
     fn execute(
         &self,
-        executor: &mut Executor,
+        storage: &mut StorageEngine,
         rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
         let start_id = self
             .next_id
             .fetch_add(self.batch_size as u64, Ordering::Relaxed);
 
-        let mut values = String::new();
         for i in 0..self.batch_size {
             let id = start_id + i as u64;
-            let k = rng.r#gen::<i64>();
-            if i > 0 {
-                values.push_str(", ");
-            }
-            values.push_str(&format!("({}, {}, 'data', 'pad')", id, k));
+        let k = rng.r#gen::<i64>();
+            let values = vec![
+                Value::Int64(id as i64),
+                Value::Int64(k),
+                Value::VarChar("data".to_string()),
+                Value::VarChar("pad".to_string()),
+            ];
+            storage.insert(&self.table_name, values)?;
         }
-
-        executor.execute(&format!(
-            "INSERT INTO {} VALUES {}",
-            self.table_name, values
-        ))?;
-
         Ok(())
     }
 

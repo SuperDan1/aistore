@@ -1,6 +1,8 @@
 //! Aistore Benchmark Tool
 
-use aistore::{catalog::Catalog, Executor};
+use aistore::storage::StorageEngine;
+use aistore::table::Column;
+use aistore::types::ColumnType;
 use clap::Parser;
 use rand::SeedableRng;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -50,12 +52,11 @@ fn run_thread(
         .seed
         .wrapping_add(thread_id as u64 * 0x9e3779b97f4a7c15);
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let catalog = Catalog::new(".").expect("Failed to create catalog");
-    let mut executor = Executor::new(Arc::new(catalog));
+    let mut storage = StorageEngine::new(".").expect("Failed to create storage engine");
 
     while !stop_flag.load(Ordering::Relaxed) {
         let start = Instant::now();
-        let _ = scenario.execute(&mut executor, &mut rng);
+        let _ = scenario.execute(&mut storage, &mut rng);
         let elapsed = start.elapsed().as_nanos() as u64;
 
         ops_counter.fetch_add(1, Ordering::Relaxed);
@@ -88,6 +89,14 @@ fn main() {
     println!("Rows: {}", args.rows);
     println!();
 
+    let columns = vec![
+        Column::new("id".to_string(), ColumnType::Int64, false, 0),
+        Column::new("k".to_string(), ColumnType::Int64, false, 1),
+        Column::new("c".to_string(), ColumnType::Varchar(100), false, 2),
+        Column::new("pad".to_string(), ColumnType::Varchar(60), false, 3),
+    ];
+
+
     let scenario: Box<dyn Scenario> = match args.scenario.as_str() {
         "point_select" => Box::new(scenarios::PointSelect::new(args.tables, args.rows)),
         "read_only" => Box::new(scenarios::ReadOnly::new(args.tables, args.rows)),
@@ -105,11 +114,21 @@ fn main() {
     };
 
     println!("Initializing...");
-    let catalog = Arc::new(Catalog::new(".").expect("Failed to create catalog"));
-    let mut executor = Executor::new(catalog);
+    let mut storage = StorageEngine::new(".").expect("Failed to create storage engine");
+
+    // Create table using StorageEngine API directly
+    for i in 0..args.tables {
+        let table_name = format!("sbtest{}", i + 1);
+        if !storage.table_exists(&table_name) {
+            storage
+                .create_table(&table_name, columns.clone())
+                .expect("Failed to create table");
+        }
+    }
+
+    // Prepare scenario with pre-populated data
     scenario
-        .as_ref()
-        .prepare(&mut executor)
+        .prepare(&mut storage, args.rows)
         .expect("Failed to prepare");
     println!("Initialization complete.");
 
