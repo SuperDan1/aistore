@@ -186,23 +186,32 @@ impl Tuple {
             return Ok(Tuple::new(vec![Value::Null; columns.len()]));
         }
         let null_bitmap_size = (columns.len() + 7) / 8;
+        if data.len() < null_bitmap_size {
+            return Err(HeapError::SerializationError("Data too short for null bitmap".to_string()));
+        }
         let null_bitmap = &data[..null_bitmap_size];
         let mut values = Vec::new();
         let mut offset = null_bitmap_size;
+        
         for (i, col) in columns.iter().enumerate() {
             let is_null = (null_bitmap[i / 8] & (1 << (i % 8))) != 0;
             if is_null {
                 values.push(Value::Null);
             } else {
-                let size = col.column_type().size();
-                if offset + size > data.len() {
-                    return Err(HeapError::SerializationError("Not enough data".to_string()));
+                // For variable length types, read what's available up to column max size
+                let max_size = col.column_type().size();
+                let available = data.len() - offset;
+                let read_size = available.min(max_size);
+                
+                if read_size == 0 {
+                    values.push(Value::Null);
+                } else {
+                    values.push(Value::deserialize(
+                        &data[offset..offset + read_size],
+                        &col.column_type(),
+                    )?);
                 }
-                values.push(Value::deserialize(
-                    &data[offset..offset + size],
-                    &col.column_type(),
-                )?);
-                offset += size;
+                offset += max_size;  // Still advance by max size for fixed types
             }
         }
         Ok(Tuple::new(values))
@@ -359,16 +368,39 @@ impl HeapTable {
     pub fn insert(&mut self, values: &[Value]) -> HeapResult<RowId> {
         let columns = self.table.columns();
         let tuple_data = Tuple::new(values.to_vec()).serialize(columns);
-        let page_id = self.first_page_id;
-        let mut heap_page = self.fetch_page(page_id)?;
-        if heap_page.can_insert(tuple_data.len()) {
-            let slot_idx = heap_page.insert_tuple(&tuple_data)?;
-            self.write_page(page_id, &heap_page)?;
-            return Ok(RowId::new(page_id, slot_idx));
+        
+        // If no pages exist yet, create first page
+        if self.pages.is_empty() {
+            let mut new_page = HeapPage::new(self.first_page_id);
+            let slot_idx = new_page.insert_tuple(&tuple_data)?;
+            self.write_page(self.first_page_id, &new_page)?;
+            return Ok(RowId::new(self.first_page_id, slot_idx));
         }
-        Err(HeapError::Other(
-            "Page full, need multi-page allocation".to_string(),
-        ))
+        
+        // Try to find a page with enough space
+        for (&page_id, heap_page) in self.pages.iter() {
+            if heap_page.can_insert(tuple_data.len()) {
+                let mut heap_page = self.fetch_page(page_id)?;
+                let slot_idx = heap_page.insert_tuple(&tuple_data)?;
+                self.write_page(page_id, &heap_page)?;
+                return Ok(RowId::new(page_id, slot_idx));
+            }
+        }
+        
+        // Allocate new page
+        let new_page_id = self.first_page_id + self.pages.len() as PageId + 1;
+        let mut new_page = HeapPage::new(new_page_id);
+        
+        if new_page.can_insert(tuple_data.len()) {
+            let slot_idx = new_page.insert_tuple(&tuple_data)?;
+            self.write_page(new_page_id, &new_page)?;
+            return Ok(RowId::new(new_page_id, slot_idx));
+        }
+        
+        Err(HeapError::Other(format!(
+            "Tuple too large for page: {} bytes",
+            tuple_data.len()
+        )))
     }
 
     pub fn get(&mut self, row_id: RowId) -> HeapResult<Tuple> {
@@ -377,24 +409,27 @@ impl HeapTable {
         Tuple::deserialize(&data, self.table.columns())
     }
 
-    /// Scan rows with optional filter
-    pub fn scan(&mut self, filter: Option<(usize, &Value)>) -> HeapResult<Vec<Tuple>> {
+    /// Scan rows - traverses all pages
+    pub fn scan_with_filter(&mut self, filter: Option<(usize, &Value)>) -> HeapResult<Vec<Tuple>> {
         let columns: Vec<_> = self.table.columns().to_vec();
-        let heap_page = self.fetch_page(self.first_page_id)?;
         let mut results = Vec::new();
-        for (_, data) in heap_page.iter_tuples() {
-            if let Ok(tuple) = Tuple::deserialize(&data, &columns) {
-                // Apply filter if provided
-                let mut matches = true;
-                if let Some((col_idx, filter_value)) = filter {
-                    if let Some(tuple_val) = tuple.get(col_idx) {
-                        matches = tuple_val == filter_value;
-                    } else {
-                        matches = false;
+        
+        // Iterate over all pages in the HashMap
+        for (_, heap_page) in self.pages.iter() {
+            for (_, data) in heap_page.iter_tuples() {
+                if let Ok(tuple) = Tuple::deserialize(&data, &columns) {
+                    // Apply filter if provided
+                    let mut matches = true;
+                    if let Some((col_idx, filter_value)) = filter {
+                        if let Some(tuple_val) = tuple.get(col_idx) {
+                            matches = tuple_val == filter_value;
+                        } else {
+                            matches = false;
+                        }
                     }
-                }
-                if matches {
-                    results.push(tuple);
+                    if matches {
+                        results.push(tuple);
+                    }
                 }
             }
         }

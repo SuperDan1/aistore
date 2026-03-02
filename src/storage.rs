@@ -140,7 +140,7 @@ impl StorageEngine {
         };
 
         heap_table
-            .scan(filter_idx)
+            .scan_with_filter(filter_idx)
             .map_err(|e| StorageError::Other(e.to_string()))
     }
 
