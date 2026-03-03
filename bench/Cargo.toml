@@ -18,3 +18,9 @@ chrono = "0.4"
 [profile.release]
 opt-level = 3
 lto = true
+
+[[example]]
+name = "test_scan"
+path = "examples/test_scan.rs"
+opt-level = 3
+lto = true
