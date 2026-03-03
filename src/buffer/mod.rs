@@ -3,13 +3,14 @@
 //! Provides page caching, LRU-based replacement, dirty page tracking,
 //! and VFS-based disk I/O.
 
-pub mod lru;
-pub mod flusher;
 pub mod double_write;
+pub mod flusher;
+pub mod lru;
 
-pub use flusher::{FlushPolicy, PageFlusher};
 pub use double_write::DoubleWriteBuffer;
+pub use flusher::{FlushPolicy, PageFlusher};
 
+use crate::buffer::lru::Node;
 use crate::infrastructure::hash::fnv1a_hash;
 use crate::page::Page;
 use crate::types::{PageId, PAGE_SIZE};
@@ -228,6 +229,11 @@ pub struct BufferMgr {
     data_dir: PathBuf,
 }
 
+/// BufferMgr is safe to share across threads because all mutable operations
+/// are protected by atomic operations (pin count) and internal locking.
+unsafe impl Send for BufferMgr {}
+unsafe impl Sync for BufferMgr {}
+
 impl BufferMgr {
     /// Creates a new BufferMgr with the specified buffer size
     ///
@@ -280,7 +286,13 @@ impl BufferMgr {
         let hot_cap = buffer_size / 2;
         let cold_cap = buffer_size * 3 / 10;
         let free_cap = buffer_size / 5;
-        let lru = LruManager::new(hot_cap, cold_cap, free_cap);
+        let mut lru = LruManager::new(hot_cap, cold_cap, free_cap);
+
+        // Pre-populate LRU free list with all available buffer indices
+        for i in 0..buffer_size {
+            lru.free_list
+                .push_front(Node::new(i, crate::buffer::lru::NodeType::Free));
+        }
 
         BufferMgr {
             buffer_size,
@@ -472,19 +484,47 @@ impl BufferMgr {
     /// Allocates a buffer slot for the given page_id
     fn allocate_buffer(&mut self, page_id: PageId) -> Result<usize, BufferError> {
         // First, try to find an unpinned buffer
-        for _ in 0..self.buffer_size {
-            if let Some(buffer_idx) = self.evict_page()? {
-                // Initialize new buffer
-                unsafe {
-                    let buffer = &mut *self.buffers.add(buffer_idx);
-                    buffer.buf_tag = BufferTag::new(page_id);
-                    buffer.state.store(0, Ordering::Relaxed);
+        for attempt in 0..10 {
+            match self.evict_page() {
+                Ok(Some(buffer_idx)) => {
+                    unsafe {
+                        let buffer = &mut *self.buffers.add(buffer_idx);
+                        buffer.buf_tag = BufferTag::new(page_id);
+                        buffer.state.store(0, Ordering::Relaxed);
+                    }
+                    return Ok(buffer_idx);
                 }
-                return Ok(buffer_idx);
+                Ok(None) => {}
+                Err(e) => {
+                    return Err(e);
+                }
             }
         }
 
         Err(BufferError::BufferPoolFull)
+    }
+
+    /// Creates a new page in the buffer pool without reading from disk
+    pub fn create_page(&mut self, page_id: PageId) -> Result<&mut Page, BufferError> {
+        // Try to find existing page first
+        if let Some(buffer_idx) = self.lookup(page_id) {
+            self.lru.access(&buffer_idx);
+            let buffer = unsafe { &*self.buffers.add(buffer_idx) };
+            buffer.pin();
+            return Ok(&mut self.page_data[buffer_idx]);
+        }
+
+        // Allocate new buffer slot
+        let buffer_idx = self.allocate_buffer(page_id)?;
+
+        self.insert_hash_entry(page_id, buffer_idx);
+        self.lru.add(buffer_idx);
+
+        // Pin the buffer
+        let buffer = unsafe { &*self.buffers.add(buffer_idx) };
+        buffer.pin();
+
+        Ok(&mut self.page_data[buffer_idx])
     }
 
     /// Retrieves a page from the buffer pool
@@ -567,6 +607,86 @@ impl BufferMgr {
     #[inline]
     pub fn buffer_size(&self) -> usize {
         self.buffer_size
+    }
+
+    /// Acquires a read lock on the page content for concurrent read access
+    ///
+    /// # Arguments
+    /// * `page_id` - The PageId to lock
+    ///
+    /// # Returns
+    /// * `Ok(Guard)` - Guard that releases the lock when dropped
+    /// * `Err(BufferError)` - Page not found
+    pub fn lock_page_read(
+        &self,
+        page_id: PageId,
+    ) -> Result<std::sync::RwLockReadGuard<'_, ()>, BufferError> {
+        if let Some(buffer_idx) = self.lookup(page_id) {
+            let buffer = unsafe { &*self.buffers.add(buffer_idx) };
+            Ok(buffer.content_lock.read().unwrap())
+        } else {
+            Err(BufferError::PageNotFound(page_id))
+        }
+    }
+
+    /// Acquires a write lock on the page content for exclusive modification
+    ///
+    /// # Arguments
+    /// * `page_id` - The PageId to lock
+    ///
+    /// # Returns
+    /// * `Ok(Guard)` - Guard that releases the lock when dropped
+    /// * `Err(BufferError)` - Page not found
+    pub fn lock_page_write(
+        &self,
+        page_id: PageId,
+    ) -> Result<std::sync::RwLockWriteGuard<'_, ()>, BufferError> {
+        if let Some(buffer_idx) = self.lookup(page_id) {
+            let buffer = unsafe { &*self.buffers.add(buffer_idx) };
+            Ok(buffer.content_lock.write().unwrap())
+        } else {
+            Err(BufferError::PageNotFound(page_id))
+        }
+    }
+
+    /// Tries to acquire a read lock on the page content (non-blocking)
+    ///
+    /// # Arguments
+    /// * `page_id` - The PageId to lock
+    ///
+    /// # Returns
+    /// * `Some(Guard)` - Guard that releases the lock when dropped
+    /// * `None` - Could not acquire lock (already locked)
+    pub fn try_lock_page_read(
+        &self,
+        page_id: PageId,
+    ) -> Option<std::sync::RwLockReadGuard<'_, ()>> {
+        if let Some(buffer_idx) = self.lookup(page_id) {
+            let buffer = unsafe { &*self.buffers.add(buffer_idx) };
+            buffer.content_lock.try_read().ok()
+        } else {
+            None
+        }
+    }
+
+    /// Tries to acquire a write lock on the page content (non-blocking)
+    ///
+    /// # Arguments
+    /// * `page_id` - The PageId to lock
+    ///
+    /// # Returns
+    /// * `Some(Guard)` - Guard that releases the lock when dropped
+    /// * `None` - Could not acquire lock (already locked)
+    pub fn try_lock_page_write(
+        &self,
+        page_id: PageId,
+    ) -> Option<std::sync::RwLockWriteGuard<'_, ()>> {
+        if let Some(buffer_idx) = self.lookup(page_id) {
+            let buffer = unsafe { &*self.buffers.add(buffer_idx) };
+            buffer.content_lock.try_write().ok()
+        } else {
+            None
+        }
     }
 }
 
