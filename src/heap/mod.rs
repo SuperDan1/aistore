@@ -2,10 +2,11 @@
 //! Provides heap table storage with BufferPool integration
 
 use crate::buffer::BufferMgr;
+use crate::page::Page;
 use crate::table::{Column, Table};
 use crate::types::{PageId, PAGE_SIZE};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub type HeapResult<T> = Result<T, HeapError>;
 
@@ -328,13 +329,17 @@ impl HeapPage {
 
 pub struct HeapTable {
     table: Arc<Table>,
-    buffer_mgr: Arc<BufferMgr>,
+    buffer_mgr: Arc<Mutex<BufferMgr>>,
     first_page_id: PageId,
     pages: HashMap<PageId, HeapPage>,
 }
 
 impl HeapTable {
-    pub fn new(table: Arc<Table>, buffer_mgr: Arc<BufferMgr>, first_page_id: PageId) -> Self {
+    pub fn new(
+        table: Arc<Table>,
+        buffer_mgr: Arc<Mutex<BufferMgr>>,
+        first_page_id: PageId,
+    ) -> Self {
         Self {
             table,
             buffer_mgr,
@@ -351,20 +356,64 @@ impl HeapTable {
     }
 
     fn fetch_page(&mut self, page_id: PageId) -> HeapResult<HeapPage> {
-        Ok(self
-            .pages
-            .get(&page_id)
-            .cloned()
-            .unwrap_or_else(|| HeapPage::new(page_id)))
+        if let Some(p) = self.pages.get(&page_id) {
+            return Ok(p.clone());
+        }
+        // Try to load from buffer pool
+        let mut buf = self.buffer_mgr.lock().unwrap();
+        if let Ok(page) = buf.get_page(page_id) {
+            let page_data = unsafe {
+                std::slice::from_raw_parts(
+                    page as *const Page as *const u8,
+                    std::mem::size_of::<Page>(),
+                )
+            };
+            let hp = HeapPage::from_bytes(page_id, page_data);
+            return Ok(hp);
+        }
+        // Page doesn't exist, create new
+        Ok(HeapPage::new(page_id))
     }
 
     fn write_page(&mut self, page_id: PageId, heap_page: &HeapPage) -> HeapResult<()> {
         self.pages.insert(page_id, heap_page.clone());
+
+        // Also write to buffer pool if page exists there
+        let mut buf = self.buffer_mgr.lock().unwrap();
+        if let Ok(page) = buf.get_page(page_id) {
+            let page_data = unsafe {
+                std::slice::from_raw_parts_mut(
+                    page as *mut Page as *mut u8,
+                    std::mem::size_of::<Page>(),
+                )
+            };
+            let src = heap_page.as_bytes();
+            if src.len() <= page_data.len() {
+                page_data[..src.len()].copy_from_slice(src);
+            }
+            buf.mark_dirty(page_id);
+        }
         Ok(())
     }
 
     pub fn flush(&mut self) -> HeapResult<()> {
-        Ok(())
+        let mut buf = self.buffer_mgr.lock().unwrap();
+        for (page_id, heap_page) in self.pages.iter() {
+            if let Ok(page) = buf.get_page(*page_id) {
+                let page_data = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        page as *mut Page as *mut u8,
+                        std::mem::size_of::<Page>(),
+                    )
+                };
+                let src = heap_page.as_bytes();
+                if src.len() <= page_data.len() {
+                    page_data[..src.len()].copy_from_slice(src);
+                }
+                buf.mark_dirty(*page_id);
+            }
+        }
+        buf.flush_all().map_err(|e| HeapError::Other(e.to_string()))
     }
 
     pub fn insert(&mut self, values: &[Value]) -> HeapResult<RowId> {
@@ -416,11 +465,9 @@ impl HeapTable {
         let columns: Vec<_> = self.table.columns().to_vec();
         let mut results = Vec::new();
 
-        // Iterate over all pages in the HashMap
         for (_, heap_page) in self.pages.iter() {
             for (_, data) in heap_page.iter_tuples() {
                 if let Ok(tuple) = Tuple::deserialize(&data, &columns) {
-                    // Apply filter if provided
                     let mut matches = true;
                     if let Some((col_idx, filter_value)) = filter {
                         if let Some(tuple_val) = tuple.get(col_idx) {

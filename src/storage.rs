@@ -7,9 +7,11 @@ use crate::catalog::Catalog;
 use crate::heap::{HeapTable, RowId, Tuple, Value};
 use crate::lock::{LockManager, LockMode, TransactionId};
 use crate::table::Column;
+use crate::types::PAGE_SIZE;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 /// Table ID type
 pub type TableId = u64;
@@ -61,7 +63,7 @@ pub type StorageResult<T> = Result<T, StorageError>;
 /// - insert / scan / update / delete: DML
 pub struct StorageEngine {
     catalog: Arc<Catalog>,
-    buffer_mgr: Arc<BufferMgr>,
+    buffer_mgr: Arc<Mutex<BufferMgr>>,
     tables: HashMap<String, HeapTable>,
     lock_mgr: LockManager,
 }
@@ -74,11 +76,11 @@ impl StorageEngine {
 
         let catalog = Catalog::new(&data_dir).map_err(|e| StorageError::Other(e.to_string()))?;
 
-        let buffer_mgr = Arc::new(BufferMgr::init(
+        let buffer_mgr = Arc::new(Mutex::new(BufferMgr::init(
             10000,
             Arc::new(crate::vfs::LocalFs::new()),
             data_dir.clone(),
-        ));
+        )));
 
         let lock_mgr = LockManager::new();
 
@@ -133,9 +135,14 @@ impl StorageEngine {
             .insert(&values)
             .map_err(|e| StorageError::Other(e.to_string()))
     }
-    
+
     /// Insert a row with transaction (acquires X lock on row)
-    pub fn insert_with_tx(&mut self, tx_id: TransactionId, table: &str, values: Vec<Value>) -> StorageResult<RowId> {
+    pub fn insert_with_tx(
+        &mut self,
+        tx_id: TransactionId,
+        table: &str,
+        values: Vec<Value>,
+    ) -> StorageResult<RowId> {
         // Get heap table first to perform insert and get RowId
         let heap_table = self
             .tables
@@ -146,21 +153,32 @@ impl StorageEngine {
         let row_id = heap_table
             .insert(&values)
             .map_err(|e| StorageError::Other(e.to_string()))?;
-        
+
         // Acquire row lock (X mode for insert)
         self.lock_mgr
-            .lock_row(tx_id, table, row_id.page_id, row_id.slot_idx, LockMode::Exclusive)
+            .lock_row(
+                tx_id,
+                table,
+                row_id.page_id,
+                row_id.slot_idx,
+                LockMode::Exclusive,
+            )
             .map_err(|e| match e {
                 crate::lock::LockError::Timeout => StorageError::LockTimeout,
                 crate::lock::LockError::Deadlock => StorageError::Deadlock,
                 _ => StorageError::Other(e.to_string()),
             })?;
-        
+
         Ok(row_id)
     }
 
     /// Scan rows with transaction (acquires S lock)
-    pub fn scan_with_tx(&mut self, tx_id: TransactionId, table: &str, filter: Option<Filter>) -> StorageResult<Vec<Tuple>> {
+    pub fn scan_with_tx(
+        &mut self,
+        tx_id: TransactionId,
+        table: &str,
+        filter: Option<Filter>,
+    ) -> StorageResult<Vec<Tuple>> {
         let heap_table = self
             .tables
             .get_mut(table)
@@ -185,7 +203,7 @@ impl StorageEngine {
                 let results = heap_table
                     .scan_with_filter(filter_idx.clone())
                     .map_err(|e| StorageError::Other(e.to_string()))?;
-                
+
                 if let Some(tuple) = results.first() {
                     if let Some(Value::Int64(id)) = tuple.get(0) {
                         // For scan, we need to lock - but we don't have exact page/slot
@@ -199,7 +217,7 @@ impl StorageEngine {
             .scan_with_filter(filter_idx)
             .map_err(|e| StorageError::Other(e.to_string()))
     }
-    
+
     /// Scan rows from a table with optional filter (without transaction)
     pub fn scan(&mut self, table: &str, filter: Option<Filter>) -> StorageResult<Vec<Tuple>> {
         let heap_table = self
@@ -240,18 +258,30 @@ impl StorageEngine {
             .update(row_id, &values)
             .map_err(|e| StorageError::Other(e.to_string()))
     }
-    
+
     /// Update a row with transaction (acquires X lock)
-    pub fn update_with_tx(&mut self, tx_id: TransactionId, table: &str, row_id: RowId, values: Vec<Value>) -> StorageResult<()> {
+    pub fn update_with_tx(
+        &mut self,
+        tx_id: TransactionId,
+        table: &str,
+        row_id: RowId,
+        values: Vec<Value>,
+    ) -> StorageResult<()> {
         // Acquire X lock on row
         self.lock_mgr
-            .lock_row(tx_id, table, row_id.page_id, row_id.slot_idx, LockMode::Exclusive)
+            .lock_row(
+                tx_id,
+                table,
+                row_id.page_id,
+                row_id.slot_idx,
+                LockMode::Exclusive,
+            )
             .map_err(|e| match e {
                 crate::lock::LockError::Timeout => StorageError::LockTimeout,
                 crate::lock::LockError::Deadlock => StorageError::Deadlock,
                 _ => StorageError::Other(e.to_string()),
             })?;
-        
+
         // Perform update
         let heap_table = self
             .tables
@@ -274,18 +304,29 @@ impl StorageEngine {
             .delete(row_id)
             .map_err(|e| StorageError::Other(e.to_string()))
     }
-    
+
     /// Delete a row with transaction (acquires X lock)
-    pub fn delete_with_tx(&mut self, tx_id: TransactionId, table: &str, row_id: RowId) -> StorageResult<()> {
+    pub fn delete_with_tx(
+        &mut self,
+        tx_id: TransactionId,
+        table: &str,
+        row_id: RowId,
+    ) -> StorageResult<()> {
         // Acquire X lock on row
         self.lock_mgr
-            .lock_row(tx_id, table, row_id.page_id, row_id.slot_idx, LockMode::Exclusive)
+            .lock_row(
+                tx_id,
+                table,
+                row_id.page_id,
+                row_id.slot_idx,
+                LockMode::Exclusive,
+            )
             .map_err(|e| match e {
                 crate::lock::LockError::Timeout => StorageError::LockTimeout,
                 crate::lock::LockError::Deadlock => StorageError::Deadlock,
                 _ => StorageError::Other(e.to_string()),
             })?;
-        
+
         // Perform delete
         let heap_table = self
             .tables

@@ -4,7 +4,7 @@ use crate::heap::{HeapTable, Value};
 use crate::sql::{self, Statement};
 use crate::table::Column;
 use crate::types::ColumnType;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub type ExecResult<T> = Result<T, ExecError>;
 
@@ -39,11 +39,11 @@ pub struct Executor {
     catalog: Arc<Catalog>,
     heap_tables: std::collections::HashMap<String, HeapTable>,
     /// Buffer pool manager for page caching
-    buffer_mgr: Arc<BufferMgr>,
+    buffer_mgr: Arc<Mutex<BufferMgr>>,
 }
 
 impl Executor {
-    pub fn new(catalog: Arc<Catalog>, buffer_mgr: Arc<BufferMgr>) -> Self {
+    pub fn new(catalog: Arc<Catalog>, buffer_mgr: Arc<Mutex<BufferMgr>>) -> Self {
         Self {
             catalog,
             heap_tables: std::collections::HashMap::new(),
