@@ -18,6 +18,7 @@ pub mod storage; // Storage Engine API
 pub mod table;
 pub mod tablespace;
 pub mod vfs;
+pub mod wal;
 
 // Re-export page items for easier access
 pub use page::Page;

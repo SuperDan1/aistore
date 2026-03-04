@@ -26,7 +26,7 @@ pub trait FileHandle: Send + Sync {
 
 /// VFS interface trait
 /// This trait defines the interface for all VFS implementations
-pub trait VfsInterface {
+pub trait VfsInterface: Send + Sync {
     /// Create a new directory
     ///
     /// # Arguments

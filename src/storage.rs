@@ -8,10 +8,10 @@ use crate::heap::{HeapTable, RowId, Tuple, Value};
 use crate::lock::{LockManager, LockMode, TransactionId};
 use crate::table::Column;
 use crate::types::PAGE_SIZE;
+use crate::wal::WalManager;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 /// Table ID type
 pub type TableId = u64;
@@ -63,9 +63,10 @@ pub type StorageResult<T> = Result<T, StorageError>;
 /// - insert / scan / update / delete: DML
 pub struct StorageEngine {
     catalog: Arc<Catalog>,
-    buffer_mgr: Arc<Mutex<BufferMgr>>,
+    buffer_mgr: Arc<RwLock<BufferMgr>>,
     tables: HashMap<String, HeapTable>,
     lock_mgr: LockManager,
+    wal: Option<WalManager>,
 }
 
 impl StorageEngine {
@@ -76,19 +77,24 @@ impl StorageEngine {
 
         let catalog = Catalog::new(&data_dir).map_err(|e| StorageError::Other(e.to_string()))?;
 
-        let buffer_mgr = Arc::new(Mutex::new(BufferMgr::init(
+        let vfs: Arc<dyn crate::vfs::VfsInterface> = Arc::new(crate::vfs::LocalFs::new());
+
+        let buffer_mgr = Arc::new(RwLock::new(BufferMgr::init(
             10000,
-            Arc::new(crate::vfs::LocalFs::new()),
+            Arc::clone(&vfs),
             data_dir.clone(),
         )));
 
         let lock_mgr = LockManager::new();
+
+        let wal = WalManager::new(data_dir, vfs).ok();
 
         Ok(Self {
             catalog: Arc::new(catalog),
             buffer_mgr,
             tables: HashMap::new(),
             lock_mgr,
+            wal,
         })
     }
 
@@ -352,11 +358,19 @@ impl StorageEngine {
 
     /// Begin a new transaction
     pub fn begin_transaction(&mut self) -> TransactionId {
-        self.lock_mgr.begin()
+        let tx_id = self.lock_mgr.begin();
+        if let Some(ref wal) = self.wal {
+            wal.tx_begin(tx_id);
+        }
+        tx_id
     }
 
     /// Commit a transaction
     pub fn commit(&mut self, tx_id: TransactionId) -> StorageResult<()> {
+        if let Some(ref wal) = self.wal {
+            wal.commit(tx_id)
+                .map_err(|e| StorageError::Other(e.to_string()))?;
+        }
         self.lock_mgr.commit(tx_id).map_err(|e| match e {
             crate::lock::LockError::Timeout => StorageError::LockTimeout,
             crate::lock::LockError::Deadlock => StorageError::Deadlock,
@@ -366,6 +380,10 @@ impl StorageEngine {
 
     /// Abort a transaction
     pub fn abort(&mut self, tx_id: TransactionId) -> StorageResult<()> {
+        if let Some(ref wal) = self.wal {
+            wal.abort(tx_id)
+                .map_err(|e| StorageError::Other(e.to_string()))?;
+        }
         self.lock_mgr.abort(tx_id).map_err(|e| match e {
             crate::lock::LockError::Timeout => StorageError::LockTimeout,
             crate::lock::LockError::Deadlock => StorageError::Deadlock,
