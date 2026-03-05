@@ -142,9 +142,87 @@ impl StorageEngine {
             .get_mut(table)
             .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
 
-        heap_table
+        let row_id = heap_table
             .insert(&values)
-            .map_err(|e| StorageError::Other(e.to_string()))
+            .map_err(|e| StorageError::Other(e.to_string()))?;
+
+        self.maintain_index_insert(table, &values, row_id)?;
+
+        Ok(row_id)
+    }
+
+    fn maintain_index_insert(
+        &mut self,
+        table: &str,
+        values: &[Value],
+        row_id: RowId,
+    ) -> StorageResult<()> {
+        let (columns, index_ids) = {
+            let heap_table = self
+                .tables
+                .get(table)
+                .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
+
+            let table_arc = heap_table.table();
+            let table_id = table_arc.table_id();
+            let columns: Vec<crate::table::Column> =
+                table_arc.columns().iter().map(|c| c.clone()).collect();
+
+            let indexes = self.index_mgr.get_table_indexes(table_id);
+            let index_ids: Vec<u64> = indexes.iter().map(|m| m.id).collect();
+
+            (columns, index_ids)
+        };
+
+        for id in index_ids {
+            if let Err(e) = self.index_mgr.insert(id, values, &columns, row_id) {
+                return Err(StorageError::Other(format!("Index insert failed: {}", e)));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn maintain_index_delete(&mut self, table: &str, row_id: RowId) -> StorageResult<()> {
+        let (old_values, columns) = {
+            let mut heap_table = self
+                .tables
+                .get_mut(table)
+                .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
+
+            let table_arc = heap_table.table();
+            let columns: Vec<crate::table::Column> =
+                table_arc.columns().iter().map(|c| c.clone()).collect();
+
+            let old_tuple = heap_table
+                .get(row_id)
+                .map_err(|e| StorageError::Other(e.to_string()))?;
+
+            let old_values: Vec<Value> = old_tuple.values().to_vec();
+
+            (old_values, columns)
+        };
+
+        let index_ids: Vec<u64> = {
+            let heap_table = self
+                .tables
+                .get(table)
+                .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
+
+            let table_arc = heap_table.table();
+            let table_id = table_arc.table_id();
+
+            let indexes = self.index_mgr.get_table_indexes(table_id);
+            indexes.iter().map(|m| m.id).collect()
+        };
+
+        for id in index_ids {
+            if let Err(e) = self.index_mgr.delete(id, &old_values, &columns, row_id) {
+                return Err(StorageError::Other(format!("Index delete failed: {}", e)));
+            }
+        }
+
+        Ok(())
     }
 
     /// Insert a row with transaction (acquires X lock on row)
@@ -165,6 +243,9 @@ impl StorageEngine {
             .insert(&values)
             .map_err(|e| StorageError::Other(e.to_string()))?;
 
+        // Maintain indexes
+        self.maintain_index_insert(table, &values, row_id)?;
+
         // Acquire row lock (X mode for insert)
         self.lock_mgr
             .lock_row(
@@ -181,6 +262,18 @@ impl StorageEngine {
             })?;
 
         Ok(row_id)
+    }
+
+    /// Get a row by RowId directly (used with index lookup)
+    pub fn get_row(&mut self, table: &str, row_id: RowId) -> StorageResult<Tuple> {
+        let heap_table = self
+            .tables
+            .get_mut(table)
+            .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
+
+        heap_table
+            .get(row_id)
+            .map_err(|e| StorageError::Other(e.to_string()))
     }
 
     /// Scan rows with transaction (acquires S lock)
@@ -260,6 +353,39 @@ impl StorageEngine {
 
     /// Update a row (without transaction)
     pub fn update(&mut self, table: &str, row_id: RowId, values: Vec<Value>) -> StorageResult<()> {
+        let (old_values, columns_clone, index_ids) = {
+            let mut heap_table = self
+                .tables
+                .get_mut(table)
+                .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
+
+            let old_tuple = heap_table
+                .get(row_id)
+                .map_err(|e| StorageError::Other(e.to_string()))?;
+
+            let old_values: Vec<Value> = old_tuple.values().to_vec();
+
+            let table_arc = heap_table.table();
+            let table_id = table_arc.table_id();
+            let columns = table_arc.columns();
+            let columns_clone: Vec<crate::table::Column> =
+                columns.iter().map(|c| c.clone()).collect();
+
+            let indexes = self.index_mgr.get_table_indexes(table_id);
+            let index_ids: Vec<u64> = indexes.iter().map(|m| m.id).collect();
+
+            for id in &index_ids {
+                if let Err(e) = self
+                    .index_mgr
+                    .delete(*id, &old_values, &columns_clone, row_id)
+                {
+                    return Err(StorageError::Other(format!("Index delete failed: {}", e)));
+                }
+            }
+
+            (old_values, columns_clone, index_ids)
+        };
+
         let heap_table = self
             .tables
             .get_mut(table)
@@ -267,7 +393,15 @@ impl StorageEngine {
 
         heap_table
             .update(row_id, &values)
-            .map_err(|e| StorageError::Other(e.to_string()))
+            .map_err(|e| StorageError::Other(e.to_string()))?;
+
+        for id in index_ids {
+            if let Err(e) = self.index_mgr.insert(id, &values, &columns_clone, row_id) {
+                return Err(StorageError::Other(format!("Index insert failed: {}", e)));
+            }
+        }
+
+        Ok(())
     }
 
     /// Update a row with transaction (acquires X lock)
@@ -306,6 +440,48 @@ impl StorageEngine {
 
     /// Delete a row (without transaction)
     pub fn delete(&mut self, table: &str, row_id: RowId) -> StorageResult<()> {
+        let old_values: Vec<Value> = {
+            let mut heap_table = self
+                .tables
+                .get_mut(table)
+                .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
+
+            let old_tuple = heap_table
+                .get(row_id)
+                .map_err(|e| StorageError::Other(e.to_string()))?;
+
+            old_tuple.values().to_vec()
+        };
+
+        let columns: Vec<crate::table::Column> = {
+            let heap_table = self
+                .tables
+                .get(table)
+                .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
+
+            let table_arc = heap_table.table();
+            table_arc.columns().iter().map(|c| c.clone()).collect()
+        };
+
+        let index_ids: Vec<u64> = {
+            let heap_table = self
+                .tables
+                .get(table)
+                .ok_or_else(|| StorageError::TableNotFound(table.to_string()))?;
+
+            let table_arc = heap_table.table();
+            let table_id = table_arc.table_id();
+
+            let indexes = self.index_mgr.get_table_indexes(table_id);
+            indexes.iter().map(|m| m.id).collect()
+        };
+
+        for id in index_ids {
+            if let Err(e) = self.index_mgr.delete(id, &old_values, &columns, row_id) {
+                return Err(StorageError::Other(format!("Index delete failed: {}", e)));
+            }
+        }
+
         let heap_table = self
             .tables
             .get_mut(table)

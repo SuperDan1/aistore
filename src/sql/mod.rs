@@ -29,6 +29,8 @@ impl std::error::Error for SqlError {}
 #[derive(Debug, Clone)]
 pub enum Statement {
     CreateTable(CreateTableStmt),
+    CreateIndex(CreateIndexStmt),
+    DropIndex(DropIndexStmt),
     Insert(InsertStmt),
     Select(SelectStmt),
     Update(UpdateStmt),
@@ -73,12 +75,31 @@ pub struct DeleteStmt {
     pub where_clause: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CreateIndexStmt {
+    pub table_name: String,
+    pub index_name: String,
+    pub columns: Vec<String>,
+    pub unique: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct DropIndexStmt {
+    pub index_name: String,
+}
+
 /// Parse SQL string into AST
 pub fn parse(sql: &str) -> SqlResult<Statement> {
     let sql = sql.trim();
 
     if sql.to_uppercase().starts_with("CREATE TABLE") {
         parse_create_table(sql)
+    } else if sql.to_uppercase().starts_with("CREATE INDEX")
+        || sql.to_uppercase().starts_with("CREATE UNIQUE INDEX")
+    {
+        parse_create_index(sql)
+    } else if sql.to_uppercase().starts_with("DROP INDEX") {
+        parse_drop_index(sql)
     } else if sql.to_uppercase().starts_with("INSERT") {
         parse_insert(sql)
     } else if sql.to_uppercase().starts_with("SELECT") {
@@ -272,4 +293,76 @@ fn parse_delete(sql: &str) -> SqlResult<Statement> {
         table_name,
         where_clause,
     }))
+}
+
+fn parse_create_index(sql: &str) -> SqlResult<Statement> {
+    let sql_upper = sql.to_uppercase();
+    let is_unique = sql_upper.contains("UNIQUE");
+
+    let after_create = if is_unique {
+        sql["CREATE UNIQUE INDEX".len()..].trim()
+    } else {
+        sql["CREATE INDEX".len()..].trim()
+    };
+
+    let parts: Vec<&str> = after_create.split_whitespace().collect();
+    if parts.len() < 4 {
+        return Err(SqlError::SyntaxError(
+            "CREATE INDEX syntax: INDEX name ON table (columns)".to_string(),
+        ));
+    }
+
+    let index_name = parts[0].to_string();
+
+    if parts[1].to_uppercase() != "ON" {
+        return Err(SqlError::SyntaxError(
+            "Expected ON after index name".to_string(),
+        ));
+    }
+
+    let table_name = parts[2].to_string();
+
+    let columns_part = after_create
+        .find('(')
+        .ok_or_else(|| SqlError::SyntaxError("Expected (columns)".to_string()))?;
+
+    let columns_str = after_create[columns_part + 1..].trim();
+    let paren_end = columns_str
+        .find(')')
+        .ok_or_else(|| SqlError::SyntaxError("Expected )".to_string()))?;
+    let columns_part = &columns_str[..paren_end];
+
+    let columns: Vec<String> = columns_part
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if columns.is_empty() {
+        return Err(SqlError::SyntaxError(
+            "Index must have at least one column".to_string(),
+        ));
+    }
+
+    Ok(Statement::CreateIndex(CreateIndexStmt {
+        table_name,
+        index_name,
+        columns,
+        unique: is_unique,
+    }))
+}
+
+fn parse_drop_index(sql: &str) -> SqlResult<Statement> {
+    let after_drop = sql["DROP INDEX".len()..].trim();
+
+    let parts: Vec<&str> = after_drop.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err(SqlError::SyntaxError(
+            "DROP INDEX syntax: DROP INDEX index_name".to_string(),
+        ));
+    }
+
+    let index_name = parts[0].to_string();
+
+    Ok(Statement::DropIndex(DropIndexStmt { index_name }))
 }

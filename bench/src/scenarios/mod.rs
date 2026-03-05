@@ -20,12 +20,24 @@ pub trait Scenario: Send + Sync {
 
     /// Get table name
     fn table_name(&self) -> &str;
+
+    /// Whether to use index for lookups
+    fn use_index(&self) -> bool {
+        false
+    }
+
+    /// Get index ID for lookups
+    fn index_id(&self) -> Option<u64> {
+        None
+    }
 }
 
 /// Point select scenario - single row lookup by primary key
 pub struct PointSelect {
     table_name: String,
     rows: usize,
+    use_index: bool,
+    index_id: Option<u64>,
 }
 
 impl PointSelect {
@@ -33,14 +45,20 @@ impl PointSelect {
         Self {
             table_name: "sbtest1".to_string(),
             rows,
+            use_index: false,
+            index_id: None,
         }
+    }
+
+    pub fn with_index(mut self, index_id: u64) -> Self {
+        self.use_index = true;
+        self.index_id = Some(index_id);
+        self
     }
 }
 
 impl Scenario for PointSelect {
     fn prepare(&self, storage: &mut StorageEngine, _rows: usize) -> Result<(), Box<dyn Error>> {
-        // Table already created in main
-        // Pre-populate with some data
         for i in 1..=100.min(self.rows) {
             let values = vec![
                 Value::Int64(i as i64),
@@ -59,17 +77,33 @@ impl Scenario for PointSelect {
         rng: &mut rand::rngs::StdRng,
     ) -> Result<(), Box<dyn Error>> {
         let id = rng.gen_range(1..=self.rows.min(100)) as i64;
-        // Use filter to get matching rows directly
-        let filter = Filter {
-            column: "id".to_string(),
-            value: Value::Int64(id),
-        };
-        let _tuples = storage.scan(&self.table_name, Some(filter))?;
+
+        if self.use_index && self.index_id.is_some() {
+            let idx_id = self.index_id.unwrap();
+            let row_ids = storage.lookup_index(idx_id, &[Value::Int64(id)])?;
+            if let Some(rid) = row_ids.first() {
+                let _tuple = storage.get_row(&self.table_name, *rid)?;
+            }
+        } else {
+            let filter = Filter {
+                column: "id".to_string(),
+                value: Value::Int64(id),
+            };
+            let _tuples = storage.scan(&self.table_name, Some(filter))?;
+        }
         Ok(())
     }
 
     fn table_name(&self) -> &str {
         &self.table_name
+    }
+
+    fn use_index(&self) -> bool {
+        self.use_index
+    }
+
+    fn index_id(&self) -> Option<u64> {
+        self.index_id
     }
 }
 

@@ -37,6 +37,12 @@ struct Args {
 
     #[arg(long, default_value = "0")]
     seed: u64,
+
+    #[arg(long, default_value = "false")]
+    index: bool,
+
+    #[arg(long, default_value = "id")]
+    index_column: String,
 }
 
 fn run_thread(
@@ -87,6 +93,10 @@ fn main() {
     println!("Duration: {}s", args.duration);
     println!("Tables: {}", args.tables);
     println!("Rows: {}", args.rows);
+    println!("Index: {}", if args.index { "yes" } else { "no" });
+    if args.index {
+        println!("Index Column: {}", args.index_column);
+    }
     println!();
 
     let columns = vec![
@@ -96,27 +106,11 @@ fn main() {
         Column::new("pad".to_string(), ColumnType::Varchar(60), false, 3),
     ];
 
-
-    let scenario: Box<dyn Scenario> = match args.scenario.as_str() {
-        "point_select" => Box::new(scenarios::PointSelect::new(args.tables, args.rows)),
-        "read_only" => Box::new(scenarios::ReadOnly::new(args.tables, args.rows)),
-        "read_write" => Box::new(scenarios::ReadWrite::new(args.tables, args.rows)),
-        "write_only" => Box::new(scenarios::WriteOnly::new(args.tables, args.rows)),
-        "update_index" => Box::new(scenarios::UpdateIndex::new(args.tables, args.rows)),
-        "update_non_index" => Box::new(scenarios::UpdateNonIndex::new(args.tables, args.rows)),
-        "insert" => Box::new(scenarios::Insert::new(args.tables, args.rows)),
-        "delete" => Box::new(scenarios::Delete::new(args.tables, args.rows)),
-        "bulk_insert" => Box::new(scenarios::BulkInsert::new(args.tables, args.rows)),
-        _ => {
-            eprintln!("Unknown scenario: {}", args.scenario);
-            std::process::exit(1);
-        }
-    };
+    let mut created_index_id: Option<u64> = None;
 
     println!("Initializing...");
     let mut storage = StorageEngine::new(".").expect("Failed to create storage engine");
 
-    // Create table using StorageEngine API directly
     for i in 0..args.tables {
         let table_name = format!("sbtest{}", i + 1);
         if !storage.table_exists(&table_name) {
@@ -124,7 +118,57 @@ fn main() {
                 .create_table(&table_name, columns.clone())
                 .expect("Failed to create table");
         }
+
+        if args.index {
+            let index_name = format!("idx_{}_{}", table_name, args.index_column);
+            let table = storage.get_table(&table_name).expect("Failed to get table");
+            let has_column = table
+                .columns()
+                .iter()
+                .any(|c| c.name() == args.index_column);
+            if has_column {
+                let index_id = storage
+                    .create_index(
+                        &table_name,
+                        &index_name,
+                        vec![args.index_column.clone()],
+                        true,
+                    )
+                    .expect("Failed to create index");
+                println!("Created index {} (id={})", index_name, index_id);
+                created_index_id = Some(index_id);
+            } else {
+                println!(
+                    "Warning: column '{}' not found in table '{}', skipping index",
+                    args.index_column, table_name
+                );
+            }
+        }
     }
+
+    let scenario: Box<dyn Scenario> = if args.index && args.scenario == "point_select" {
+        if let Some(index_id) = created_index_id {
+            Box::new(scenarios::PointSelect::new(args.tables, args.rows).with_index(index_id))
+        } else {
+            Box::new(scenarios::PointSelect::new(args.tables, args.rows))
+        }
+    } else {
+        match args.scenario.as_str() {
+            "point_select" => Box::new(scenarios::PointSelect::new(args.tables, args.rows)),
+            "read_only" => Box::new(scenarios::ReadOnly::new(args.tables, args.rows)),
+            "read_write" => Box::new(scenarios::ReadWrite::new(args.tables, args.rows)),
+            "write_only" => Box::new(scenarios::WriteOnly::new(args.tables, args.rows)),
+            "update_index" => Box::new(scenarios::UpdateIndex::new(args.tables, args.rows)),
+            "update_non_index" => Box::new(scenarios::UpdateNonIndex::new(args.tables, args.rows)),
+            "insert" => Box::new(scenarios::Insert::new(args.tables, args.rows)),
+            "delete" => Box::new(scenarios::Delete::new(args.tables, args.rows)),
+            "bulk_insert" => Box::new(scenarios::BulkInsert::new(args.tables, args.rows)),
+            _ => {
+                eprintln!("Unknown scenario: {}", args.scenario);
+                std::process::exit(1);
+            }
+        }
+    };
 
     // Prepare scenario with pre-populated data
     scenario
