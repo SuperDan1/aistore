@@ -5,6 +5,7 @@
 use crate::buffer::BufferMgr;
 use crate::catalog::Catalog;
 use crate::heap::{HeapTable, RowId, Tuple, Value};
+use crate::index::IndexManager;
 use crate::lock::{LockManager, LockMode, TransactionId};
 use crate::table::Column;
 use crate::types::PAGE_SIZE;
@@ -67,6 +68,7 @@ pub struct StorageEngine {
     tables: HashMap<String, HeapTable>,
     lock_mgr: LockManager,
     wal: Option<WalManager>,
+    index_mgr: IndexManager,
 }
 
 impl StorageEngine {
@@ -87,7 +89,9 @@ impl StorageEngine {
 
         let lock_mgr = LockManager::new();
 
-        let wal = WalManager::new(data_dir, vfs).ok();
+        let wal = WalManager::new(data_dir, vfs.clone()).ok();
+
+        let index_mgr = IndexManager::new(Arc::clone(&buffer_mgr));
 
         Ok(Self {
             catalog: Arc::new(catalog),
@@ -95,6 +99,7 @@ impl StorageEngine {
             tables: HashMap::new(),
             lock_mgr,
             wal,
+            index_mgr,
         })
     }
 
@@ -399,5 +404,43 @@ impl StorageEngine {
                 .map_err(|e| StorageError::Other(e.to_string()))?;
         }
         Ok(())
+    }
+
+    /// Create an index on a table
+    pub fn create_index(
+        &mut self,
+        table: &str,
+        name: &str,
+        columns: Vec<String>,
+        unique: bool,
+    ) -> StorageResult<u64> {
+        let table_arc = self
+            .catalog
+            .get_table(table)
+            .map_err(|e| StorageError::Other(e.to_string()))?;
+
+        let table = table_arc.as_ref();
+        let table_id = table.table_id();
+
+        let index_id = self
+            .index_mgr
+            .create_index(table_id, name.to_string(), columns, unique)
+            .map_err(|e| StorageError::Other(e.to_string()))?;
+
+        Ok(index_id)
+    }
+
+    /// Drop an index
+    pub fn drop_index(&mut self, index_id: u64) -> StorageResult<()> {
+        self.index_mgr
+            .drop_index(index_id)
+            .map_err(|e| StorageError::Other(e.to_string()))
+    }
+
+    /// Lookup by index
+    pub fn lookup_index(&self, index_id: u64, values: &[Value]) -> StorageResult<Vec<RowId>> {
+        self.index_mgr
+            .lookup(index_id, values, &[])
+            .map_err(|e| StorageError::Other(e.to_string()))
     }
 }
