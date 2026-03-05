@@ -50,9 +50,10 @@ impl std::error::Error for WalError {}
 pub type WalResult<T> = Result<T, WalError>;
 
 /// Transaction LSN tracking
+#[allow(dead_code)]
 struct TxLsn {
     prev_lsn: LSN,
-    commit_lsn: LSN,
+    commit_lsn: LSN, // Kept for future use: tracking commit LSN for recovery
 }
 
 /// WAL Manager
@@ -119,7 +120,13 @@ impl WalManager {
             .unwrap_or(LSN::invalid());
 
         let data = record.serialize();
-        let lsn = self.buffer.append(tx_id, data, None);
+        let lsn = match self.buffer.append(tx_id, data, None) {
+            Ok(lsn) => lsn,
+            Err(e) => {
+                eprintln!("WAL: Failed to append record: {}", e);
+                return LSN::invalid();
+            }
+        };
 
         self.tx_lsns.write().insert(
             tx_id,
@@ -145,17 +152,17 @@ impl WalManager {
         }
 
         let tx_lsn = self.tx_lsns.write().remove(&tx_id);
-        let prev_lsn = tx_lsn
+        let (prev_lsn, commit_lsn) = tx_lsn
             .as_ref()
-            .map(|t| t.prev_lsn)
-            .unwrap_or(LSN::invalid());
+            .map(|t| (t.prev_lsn, t.commit_lsn))
+            .unwrap_or((LSN::invalid(), LSN::invalid()));
 
         let record = LogRecord::tx_commit(tx_id, prev_lsn);
         self.append(tx_id, record);
 
         self.buffer.flush().map_err(|e| WalError::IoError(e))?;
 
-        Ok(LSN::invalid())
+        Ok(commit_lsn)
     }
 
     /// Abort a transaction
@@ -233,9 +240,8 @@ impl WalManager {
         self.file_mgr.current_lsn()
     }
 
-    /// Perform checkpoint
-    pub fn checkpoint(&self) -> WalResult<LSN> {
-        let dirty_pages = Vec::<PageId>::new();
+    /// Perform checkpoint with provided dirty pages
+    pub fn checkpoint(&self, dirty_pages: Vec<PageId>) -> WalResult<LSN> {
         let active_transactions: Vec<u64> = self.tx_lsns.read().keys().cloned().collect();
 
         let lsn = self.file_mgr.current_lsn();
@@ -244,7 +250,6 @@ impl WalManager {
         mgr.checkpoint(lsn, dirty_pages, active_transactions)
             .map_err(|e| WalError::IoError(e.to_string()))?;
 
-        // Clean up old log files
         let _ = self.file_mgr.cleanup_old_logs(lsn);
 
         Ok(lsn)

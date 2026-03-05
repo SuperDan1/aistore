@@ -20,6 +20,7 @@ mod table;
 mod tablespace;
 mod types;
 mod vfs;
+mod wal;
 
 use heap::{RowId, Value};
 use storage::StorageEngine;
@@ -83,7 +84,7 @@ fn main() {
 
     // Scan all rows
     println!("\n--- Scanning all rows ---");
-    let rows = engine.scan("users").expect("Failed to scan");
+    let rows = engine.scan("users", None).expect("Failed to scan");
     println!("Found {} rows:", rows.len());
     for row in &rows {
         let vals: Vec<String> = row.values().iter().map(|v| format!("{:?}", v)).collect();
@@ -104,7 +105,7 @@ fn main() {
 
     // Scan again
     println!("\n--- Scanning after update ---");
-    let rows = engine.scan("users").expect("Failed to scan");
+    let rows = engine.scan("users", None).expect("Failed to scan");
     for row in &rows {
         let vals: Vec<String> = row.values().iter().map(|v| format!("{:?}", v)).collect();
         println!("  {:?}", vals);
@@ -117,7 +118,7 @@ fn main() {
 
     // Final scan
     println!("\n--- Final scan ---");
-    let rows = engine.scan("users").expect("Failed to scan");
+    let rows = engine.scan("users", None).expect("Failed to scan");
     println!("{} rows remaining:", rows.len());
     for row in &rows {
         let vals: Vec<String> = row.values().iter().map(|v| format!("{:?}", v)).collect();
