@@ -1,4 +1,4 @@
-1|sbtest1|1|User|0|4|1772708669
+4|sbtest4|1|User|0|4|1772502832
 COLUMN|id|Int64|false|0
 COLUMN|k|Int64|false|1
 COLUMN|c|Varchar(100)|false|2

@@ -1,0 +1,5 @@
+1|test|1|User|0|4|1772512104
+COLUMN|id|Int64|false|0
+COLUMN|k1|Int64|false|1
+COLUMN|k2|Int64|false|2
+COLUMN|k3|Int64|false|3
