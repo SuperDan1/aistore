@@ -89,9 +89,9 @@ impl StorageEngine {
 
         let lock_mgr = LockManager::new();
 
-        let wal = WalManager::new(data_dir, vfs.clone()).ok();
+        let wal = WalManager::new(data_dir.clone(), vfs.clone()).ok();
 
-        let index_mgr = IndexManager::new(Arc::clone(&buffer_mgr));
+        let index_mgr = IndexManager::new(Arc::clone(&buffer_mgr), data_dir);
 
         Ok(Self {
             catalog: Arc::new(catalog),
