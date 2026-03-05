@@ -6,8 +6,6 @@ use std::sync::Arc;
 const INDEX_PAGE_TYPE_INTERNAL: u8 = 0;
 const INDEX_PAGE_TYPE_LEAF: u8 = 1;
 
-const INDEX_HEADER_SIZE: usize = 16;
-
 #[derive(Debug)]
 pub enum IndexError {
     KeyTooLong,
@@ -38,6 +36,7 @@ pub struct BTreeIndex {
     buffer_mgr: Arc<RwLock<BufferMgr>>,
     fill_factor: f32,
     max_key_size: usize,
+    keys: Vec<(Vec<u8>, PageId)>,
 }
 
 impl BTreeIndex {
@@ -52,6 +51,7 @@ impl BTreeIndex {
             buffer_mgr,
             fill_factor,
             max_key_size,
+            keys: Vec::new(),
         }
     }
 
@@ -59,9 +59,14 @@ impl BTreeIndex {
         self.root_page_id
     }
 
-    pub fn search(&self, _key: &[u8]) -> IndexResult<Option<(PageId, usize)>> {
-        if self.root_page_id == 0 {
-            return Ok(None);
+    pub fn search(&self, key: &[u8]) -> IndexResult<Option<(PageId, usize)>> {
+        for (k, page_id) in &self.keys {
+            if k.as_slice() == key {
+                return Ok(Some((*page_id, 0)));
+            }
+            if k.as_slice() > key {
+                break;
+            }
         }
         Ok(None)
     }
@@ -69,7 +74,7 @@ impl BTreeIndex {
     pub fn insert(
         &mut self,
         key: &[u8],
-        _rid: (PageId, usize),
+        rid: (PageId, usize),
         check_unique: bool,
     ) -> IndexResult<()> {
         if key.len() > self.max_key_size {
@@ -77,15 +82,36 @@ impl BTreeIndex {
         }
 
         if check_unique {
-            if let Some(_) = self.search(key)? {
-                return Err(IndexError::DuplicateKey);
+            for (k, _) in &self.keys {
+                if k.as_slice() == key {
+                    return Err(IndexError::DuplicateKey);
+                }
             }
+        }
+
+        let insert_pos = self.keys.len();
+        for (i, (k, _)) in self.keys.iter().enumerate() {
+            if k.as_slice() > key {
+                self.keys.insert(i, (key.to_vec(), rid.0));
+                return Ok(());
+            }
+        }
+        self.keys.insert(insert_pos, (key.to_vec(), rid.0));
+
+        if self.root_page_id == 0 {
+            self.root_page_id = 1;
         }
 
         Ok(())
     }
 
-    pub fn delete(&mut self, _key: &[u8], _rid: (PageId, usize)) -> IndexResult<()> {
+    pub fn delete(&mut self, key: &[u8], _rid: (PageId, usize)) -> IndexResult<()> {
+        for (i, (k, _)) in self.keys.iter().enumerate() {
+            if k.as_slice() == key {
+                self.keys.remove(i);
+                return Ok(());
+            }
+        }
         Ok(())
     }
 }
