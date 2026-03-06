@@ -11,12 +11,14 @@ pub mod heap;
 pub mod index;
 pub mod infrastructure;
 pub mod lock;
+pub mod mvcc;
 pub mod page;
 pub mod segment;
 pub mod sql;
 pub mod storage; // Storage Engine API
 pub mod table;
 pub mod tablespace;
+pub mod undo;
 pub mod vfs;
 pub mod wal;
 

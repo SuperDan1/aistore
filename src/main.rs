@@ -12,6 +12,7 @@ mod heap;
 mod index;
 mod infrastructure;
 mod lock;
+mod mvcc;
 mod page;
 mod segment;
 mod sql;
@@ -19,6 +20,7 @@ mod storage;
 mod table;
 mod tablespace;
 mod types;
+mod undo;
 mod vfs;
 mod wal;
 

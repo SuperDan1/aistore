@@ -219,6 +219,9 @@ pub enum TransactionStatus {
 /// Transaction ID type
 pub type TransactionId = u64;
 
+/// LSN (Log Sequence Number) type
+pub type LSN = u64;
+
 /// Transaction information
 #[derive(Debug, Clone)]
 pub struct TransactionInfo {
@@ -231,6 +234,253 @@ pub struct TransactionInfo {
     /// End time
     pub end_time: Option<Timestamp>,
 }
+
+// =============================================================================
+// MVCC Types
+// =============================================================================
+
+/// Row-level MVCC metadata (stored at the beginning of each row)
+#[derive(Debug, Clone, Copy)]
+pub struct RowMVCCHeader {
+    /// Transaction ID that created this version
+    pub tx_id_created: TransactionId,
+    /// Transaction ID that deleted this version (0 = not deleted)
+    pub tx_id_deleted: TransactionId,
+    /// Pointer to Undo record (page_id + offset)
+    pub undo_ptr: UndoPtr,
+    /// Row data length
+    pub row_length: u16,
+}
+
+impl RowMVCCHeader {
+    /// Size of the header in bytes
+    pub const SIZE: usize = 8 + 8 + 16 + 2; // 34 bytes
+
+    pub fn new(tx_id: TransactionId, undo_ptr: UndoPtr, row_length: u16) -> Self {
+        Self {
+            tx_id_created: tx_id,
+            tx_id_deleted: 0,
+            undo_ptr,
+            row_length,
+        }
+    }
+
+    pub fn is_deleted(&self) -> bool {
+        self.tx_id_deleted != 0
+    }
+
+    /// Serialize to bytes
+    pub fn to_bytes(&self) -> [u8; Self::SIZE] {
+        let mut bytes = [0u8; Self::SIZE];
+        bytes[0..8].copy_from_slice(&self.tx_id_created.to_le_bytes());
+        bytes[8..16].copy_from_slice(&self.tx_id_deleted.to_le_bytes());
+        bytes[16..24].copy_from_slice(&self.undo_ptr.page_id.to_le_bytes());
+        bytes[24..26].copy_from_slice(&self.undo_ptr.offset.to_le_bytes());
+        bytes[26..34].copy_from_slice(&self.undo_ptr.lsn.to_le_bytes());
+        bytes
+    }
+
+    /// Deserialize from bytes
+    pub fn from_bytes(bytes: &[u8; Self::SIZE]) -> Self {
+        let tx_id_created = TransactionId::from_le_bytes(bytes[0..8].try_into().unwrap());
+        let tx_id_deleted = TransactionId::from_le_bytes(bytes[8..16].try_into().unwrap());
+        let undo_page_id = PageId::from_le_bytes(bytes[16..24].try_into().unwrap());
+        let undo_offset = u16::from_le_bytes(bytes[24..26].try_into().unwrap());
+        let undo_lsn = LSN::from_le_bytes(bytes[26..34].try_into().unwrap());
+
+        Self {
+            tx_id_created,
+            tx_id_deleted,
+            undo_ptr: UndoPtr {
+                page_id: undo_page_id,
+                offset: undo_offset,
+                lsn: undo_lsn,
+            },
+            row_length: 0, // Will be set separately
+        }
+    }
+}
+
+/// Undo record pointer
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UndoPtr {
+    /// Undo page ID
+    pub page_id: PageId,
+    /// Offset within the page
+    pub offset: u16,
+    /// LSN of the undo record (for recovery)
+    pub lsn: LSN,
+}
+
+impl UndoPtr {
+    pub fn null() -> Self {
+        Self {
+            page_id: 0,
+            offset: 0,
+            lsn: 0,
+        }
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.page_id == 0 && self.offset == 0
+    }
+}
+
+/// Undo record type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UndoType {
+    /// Insert operation (rollback = delete)
+    Insert,
+    /// Update operation (rollback = restore before_image)
+    Update,
+    /// Delete operation (rollback = undelete)
+    Delete,
+}
+
+/// Undo record header
+#[derive(Debug, Clone, Copy)]
+pub struct UndoRecordHeader {
+    /// Record length (including header)
+    pub length: u32,
+    /// Transaction ID
+    pub tx_id: TransactionId,
+    /// Table ID
+    pub table_id: u32,
+    /// Row page ID
+    pub row_page_id: PageId,
+    /// Row slot index
+    pub row_slot_idx: usize,
+    /// Previous undo record pointer (forms chain)
+    pub prev_undo_ptr: UndoPtr,
+    /// Undo operation type
+    pub undo_type: UndoType,
+    /// Checksum
+    pub checksum: u32,
+}
+
+impl UndoRecordHeader {
+    pub const SIZE: usize = 4 + 8 + 4 + 8 + 8 + 16 + 1 + 4; // 53 bytes (padded to 56)
+}
+
+/// Complete undo record
+pub struct UndoRecord {
+    pub header: UndoRecordHeader,
+    /// Before image (for Update: old data, for Insert: empty, for Delete: old data)
+    pub before_image: Vec<u8>,
+}
+
+impl UndoRecord {
+    pub fn new(header: UndoRecordHeader, before_image: Vec<u8>) -> Self {
+        Self {
+            header,
+            before_image,
+        }
+    }
+
+    /// Calculate serialized size
+    pub fn serialized_size(&self) -> usize {
+        // Header is padded to 56 bytes + before_image
+        56 + self.before_image.len()
+    }
+}
+
+/// Row version info (from page)
+#[derive(Debug, Clone)]
+pub struct RowVersion {
+    pub tx_id_created: TransactionId,
+    pub tx_id_deleted: TransactionId,
+    pub undo_ptr: UndoPtr,
+    pub is_current: bool,
+}
+
+/// Isolation level
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsolationLevel {
+    /// Read Committed - read latest committed data
+    ReadCommitted,
+    /// Repeatable Read - snapshot at transaction start
+    RepeatableRead,
+}
+
+impl Default for IsolationLevel {
+    fn default() -> Self {
+        Self::ReadCommitted
+    }
+}
+
+/// Read snapshot for visibility check
+#[derive(Debug, Clone)]
+pub struct ReadSnapshot {
+    /// Transaction ID
+    pub tx_id: TransactionId,
+    /// Snapshot creation LSN
+    pub snapshot_lsn: LSN,
+    /// Max committed transaction ID at snapshot time
+    pub max_committed_tx: TransactionId,
+    /// Active transactions at snapshot time
+    pub active_txns: Vec<TransactionId>,
+    /// Isolation level
+    pub isolation: IsolationLevel,
+}
+
+impl ReadSnapshot {
+    /// Check if a version is visible to this snapshot (RC)
+    pub fn is_visible_rc(&self, version: &RowVersion) -> bool {
+        let created = version.tx_id_created;
+        let deleted = version.tx_id_deleted;
+
+        // Visible if created by committed transaction
+        let created_committed = created <= self.max_committed_tx || !self.is_active(created);
+
+        // Visible if not deleted, or deleted by uncommitted transaction
+        let not_deleted =
+            deleted == 0 || deleted > self.max_committed_tx || self.is_active(deleted);
+
+        created_committed && not_deleted
+    }
+
+    /// Check if a transaction is active
+    pub fn is_active(&self, tx_id: TransactionId) -> bool {
+        self.active_txns.contains(&tx_id)
+    }
+}
+
+/// MVCC error types
+#[derive(Debug)]
+pub enum MvccError {
+    /// Row not visible
+    RowNotVisible,
+    /// Row already deleted
+    RowAlreadyDeleted,
+    /// Row not found
+    RowNotFound,
+    /// Undo record not found
+    UndoNotFound,
+    /// Transaction not found
+    TransactionNotFound,
+    /// Transaction not active
+    TransactionNotActive,
+    /// Other MVCC error
+    Other(String),
+}
+
+impl std::fmt::Display for MvccError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MvccError::RowNotVisible => write!(f, "Row not visible to transaction"),
+            MvccError::RowAlreadyDeleted => write!(f, "Row already deleted"),
+            MvccError::RowNotFound => write!(f, "Row not found"),
+            MvccError::UndoNotFound => write!(f, "Undo record not found"),
+            MvccError::TransactionNotFound => write!(f, "Transaction not found"),
+            MvccError::TransactionNotActive => write!(f, "Transaction not active"),
+            MvccError::Other(msg) => write!(f, "MVCC error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for MvccError {}
+
+pub type MvccResult<T> = Result<T, MvccError>;
 
 /// Column type enumeration for table schema
 ///

@@ -14,6 +14,7 @@ pub use transaction::{
     LockError, LockMode, LockResult, Transaction, TransactionId, TransactionManager, TxStatus,
 };
 
+use crate::types::{TransactionId as TxId, UndoPtr};
 use std::time::Duration;
 
 /// Unified Lock Manager
@@ -80,8 +81,22 @@ impl LockManager {
         self.table_locks.unlock(tx_id, table);
     }
 
-    pub fn set_timeout(&self, _duration: Duration) {
-        // Timeout would need interior mutability - simplified for now
+    pub fn set_timeout(&self, _duration: Duration) {}
+
+    pub fn get_max_committed_tx(&self) -> TransactionId {
+        self.tx_manager.get_max_committed_tx()
+    }
+
+    pub fn get_active_txns(&self) -> Vec<TransactionId> {
+        self.tx_manager.get_active_txns()
+    }
+
+    pub fn set_last_undo_ptr(&self, tx_id: TransactionId, ptr: UndoPtr) {
+        self.tx_manager.set_last_undo_ptr(tx_id, ptr);
+    }
+
+    pub fn get_last_undo_ptr(&self, tx_id: TransactionId) -> UndoPtr {
+        self.tx_manager.get_last_undo_ptr(tx_id)
     }
 }
 

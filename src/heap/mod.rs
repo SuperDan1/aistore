@@ -4,7 +4,7 @@
 use crate::buffer::BufferMgr;
 use crate::page::Page;
 use crate::table::{Column, Table};
-use crate::types::{PageId, PAGE_SIZE};
+use crate::types::{PageId, RowMVCCHeader, TransactionId, UndoPtr, PAGE_SIZE};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -169,6 +169,15 @@ impl Tuple {
     }
 
     pub fn serialize(&self, columns: &[Column]) -> Vec<u8> {
+        self.serialize_with_mvcc(columns, None, None)
+    }
+
+    pub fn serialize_with_mvcc(
+        &self,
+        columns: &[Column],
+        tx_id_created: Option<TransactionId>,
+        undo_ptr: Option<UndoPtr>,
+    ) -> Vec<u8> {
         let mut result = Vec::new();
         let mut null_bitmap = vec![0u8; (columns.len() + 7) / 8];
         for (i, val) in self.values.iter().enumerate() {
@@ -176,6 +185,13 @@ impl Tuple {
                 null_bitmap[i / 8] |= 1 << (i % 8);
             }
         }
+
+        // Add MVCC header if provided
+        if let Some(tx_id) = tx_id_created {
+            let header = RowMVCCHeader::new(tx_id, undo_ptr.unwrap_or(UndoPtr::null()), 0);
+            result.extend_from_slice(&header.to_bytes());
+        }
+
         result.extend(null_bitmap);
         for val in &self.values {
             result.extend(val.serialize());
@@ -183,17 +199,49 @@ impl Tuple {
         result
     }
 
+    pub fn get_mvcc_header(data: &[u8]) -> Option<RowMVCCHeader> {
+        if data.len() >= RowMVCCHeader::SIZE {
+            let mut bytes = [0u8; 34];
+            bytes.copy_from_slice(&data[..34]);
+            Some(RowMVCCHeader::from_bytes(&bytes))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_row_data_with_mvcc(data: &[u8]) -> Option<Vec<u8>> {
+        if data.len() >= RowMVCCHeader::SIZE {
+            Some(data[RowMVCCHeader::SIZE..].to_vec())
+        } else {
+            None
+        }
+    }
+
     pub fn deserialize(data: &[u8], columns: &[Column]) -> HeapResult<Self> {
+        Self::deserialize_with_mvcc(data, columns)
+    }
+
+    pub fn deserialize_with_mvcc(data: &[u8], columns: &[Column]) -> HeapResult<Self> {
         if data.is_empty() {
             return Ok(Tuple::new(vec![Value::Null; columns.len()]));
         }
+
+        // Check for MVCC header and skip it if present
+        let (actual_data, has_mvcc) = if data.len() >= RowMVCCHeader::SIZE
+            && data.len() >= RowMVCCHeader::SIZE + columns.len() / 8 + 4
+        {
+            (&data[RowMVCCHeader::SIZE..], true)
+        } else {
+            (data, false)
+        };
+
         let null_bitmap_size = (columns.len() + 7) / 8;
-        if data.len() < null_bitmap_size {
+        if actual_data.len() < null_bitmap_size {
             return Err(HeapError::SerializationError(
                 "Data too short for null bitmap".to_string(),
             ));
         }
-        let null_bitmap = &data[..null_bitmap_size];
+        let null_bitmap = &actual_data[..null_bitmap_size];
         let mut values = Vec::new();
         let mut offset = null_bitmap_size;
 
@@ -477,6 +525,45 @@ impl HeapTable {
                             matches = false;
                         }
                     }
+
+                    impl HeapTable {
+                        pub fn iter_visible<F>(
+                            &mut self,
+                            mut visible_check: F,
+                        ) -> HeapResult<Vec<Tuple>>
+                        where
+                            F: FnMut(&RowMVCCHeader) -> bool,
+                        {
+                            let columns: Vec<_> = self.table.columns().to_vec();
+                            let mut results = Vec::new();
+
+                            let page_ids: Vec<_> = self.pages.keys().cloned().collect();
+                            for page_id in page_ids {
+                                let page = self.fetch_page(page_id)?;
+
+                                for (slot_idx, data) in page.iter_tuples() {
+                                    let is_visible = if data.len() >= RowMVCCHeader::SIZE {
+                                        let mut header_bytes = [0u8; 34];
+                                        header_bytes.copy_from_slice(&data[..34]);
+                                        let header = RowMVCCHeader::from_bytes(&header_bytes);
+                                        visible_check(&header)
+                                    } else {
+                                        true
+                                    };
+
+                                    if is_visible {
+                                        if let Ok(tuple) =
+                                            Tuple::deserialize_with_mvcc(&data, &columns)
+                                        {
+                                            results.push(tuple);
+                                        }
+                                    }
+                                }
+                            }
+
+                            Ok(results)
+                        }
+                    }
                     if matches {
                         results.push(tuple);
                     }
@@ -498,5 +585,80 @@ impl HeapTable {
         let mut heap_page = self.fetch_page(row_id.page_id)?;
         heap_page.delete_tuple(row_id.slot_idx)?;
         self.write_page(row_id.page_id, &heap_page)
+    }
+
+    pub fn insert_raw(&mut self, data: &[u8]) -> HeapResult<RowId> {
+        if self.pages.is_empty() {
+            let mut new_page = HeapPage::new(self.first_page_id);
+            let slot_idx = new_page.insert_tuple(data)?;
+            self.write_page(self.first_page_id, &new_page)?;
+            return Ok(RowId::new(self.first_page_id, slot_idx));
+        }
+
+        for (&page_id, heap_page) in self.pages.iter() {
+            if heap_page.can_insert(data.len()) {
+                let mut heap_page = self.fetch_page(page_id)?;
+                let slot_idx = heap_page.insert_tuple(data)?;
+                self.write_page(page_id, &heap_page)?;
+                return Ok(RowId::new(page_id, slot_idx));
+            }
+        }
+
+        let new_page_id = self.first_page_id + self.pages.len() as PageId + 1;
+        let mut new_page = HeapPage::new(new_page_id);
+
+        if new_page.can_insert(data.len()) {
+            let slot_idx = new_page.insert_tuple(data)?;
+            self.write_page(new_page_id, &new_page)?;
+            return Ok(RowId::new(new_page_id, slot_idx));
+        }
+
+        Err(HeapError::OutOfSpace)
+    }
+
+    pub fn get_raw(&mut self, row_id: RowId) -> HeapResult<Vec<u8>> {
+        let heap_page = self.fetch_page(row_id.page_id)?;
+        heap_page.get_tuple(row_id.slot_idx)
+    }
+
+    pub fn update_raw(&mut self, row_id: RowId, data: &[u8]) -> HeapResult<()> {
+        let mut heap_page = self.fetch_page(row_id.page_id)?;
+
+        // In-place update: just replace the data in the same slot
+        let slot_offset = row_id.slot_idx * std::mem::size_of::<SlotEntry>();
+
+        // Get old slot entry
+        let old_offset = i32::from_le_bytes(
+            heap_page.data[slot_offset..slot_offset + 4]
+                .try_into()
+                .unwrap(),
+        );
+        let old_length = u32::from_le_bytes(
+            heap_page.data[slot_offset + 4..slot_offset + 8]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+
+        if old_offset == 0 && old_length == 0 {
+            return Err(HeapError::TupleNotFound(row_id));
+        }
+
+        // Check if new data fits in same space
+        if data.len() <= old_length as usize {
+            // Overwrite in place
+            let actual_offset = (PAGE_SIZE as i32 + old_offset) as usize;
+            heap_page.data[actual_offset..actual_offset + data.len()].copy_from_slice(data);
+            // Update length if smaller
+            heap_page.data[slot_offset + 4..slot_offset + 8]
+                .copy_from_slice(&(data.len() as u32).to_le_bytes());
+        } else {
+            // Need to delete and insert
+            heap_page.delete_tuple(row_id.slot_idx)?;
+            self.write_page(row_id.page_id, &heap_page)?;
+            self.insert_raw(data)?;
+        }
+
+        self.write_page(row_id.page_id, &heap_page)?;
+        Ok(())
     }
 }
