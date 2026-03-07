@@ -68,14 +68,14 @@ impl UndoManager {
         let (segment_id, offset) = self.write_to_segment(&serialized)?;
 
         Ok(UndoPtr {
-            page_id: segment_id as PageId,
+            page_id: (segment_id + 1) as PageId,
             offset,
             lsn: 0,
         })
     }
 
     pub fn get(&self, ptr: &UndoPtr) -> UndoResult<UndoRecord> {
-        let segment_id = ptr.page_id as u32;
+        let segment_id = (ptr.page_id as u32).saturating_sub(1);
         let mut segments = self.segments.write().unwrap();
 
         let segment = segments

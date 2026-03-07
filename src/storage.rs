@@ -844,16 +844,13 @@ mod mvcc_tests {
 
         // T1: INSERT value=1, COMMIT
         let tx1 = storage.begin_transaction();
-        storage
+        let row_id = storage
             .insert_with_tx(tx1, "test", vec![Value::Int64(1), Value::Int64(1)])
             .unwrap();
         storage.commit(tx1).unwrap();
 
         // T2: UPDATE value=2, DON'T COMMIT
         let tx2 = storage.begin_transaction();
-        let rows = storage.scan("test", None).unwrap();
-        assert_eq!(rows.len(), 1);
-        let row_id = RowId::new(1, 0);
         storage
             .update_with_tx(tx2, "test", row_id, vec![Value::Int64(1), Value::Int64(2)])
             .unwrap();
