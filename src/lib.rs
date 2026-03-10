@@ -1,46 +1,25 @@
 //! Aistore storage engine library
 
-// Global type definitions
-pub mod types;
-
-// Import various modules
-pub mod buffer;
-pub mod catalog;
-pub mod controlfile;
-pub mod heap;
-pub mod index;
-pub mod infrastructure;
-pub mod lock;
-pub mod mvcc;
-pub mod page;
-pub mod segment;
-pub mod sql;
-pub mod storage; // Storage Engine API
-pub mod table;
-pub mod tablespace;
-pub mod undo;
-pub mod vfs;
-pub mod wal;
-
-// Re-export page items for easier access
-pub use page::Page;
-
-// Re-export vfs items for easier access
-pub use vfs::VfsError;
-pub use vfs::VfsInterface;
-
-// Re-export heap items for easier access
-pub use heap::{HeapTable, RowId, Tuple, Value};
-
-// Re-export lock items for easier access
-pub use lock::{LockManager, LockMode, TransactionId};
-
-// Re-export storage engine API
+// Re-export storage engine API only
+pub use heap::{HeapError, RowId, Tuple, Value};
 pub use storage::{Filter, StorageEngine, StorageError, StorageResult, TableId};
 
-// Re-export catalog and table items
-pub use catalog::Catalog;
-pub use table::Column;
-
-// Re-export buffer items
-pub use buffer::BufferMgr;
+// Internal modules (pub(crate) for crate-internal visibility)
+pub(crate) mod buffer;
+pub(crate) mod catalog;
+pub(crate) mod controlfile;
+pub(crate) mod heap;
+pub(crate) mod index;
+pub(crate) mod infrastructure;
+pub(crate) mod lock;
+pub(crate) mod mvcc;
+pub(crate) mod page;
+pub(crate) mod segment;
+pub(crate) mod sql;
+pub(crate) mod storage;
+pub(crate) mod table;
+pub(crate) mod tablespace;
+pub(crate) mod types;
+pub(crate) mod undo;
+pub(crate) mod vfs;
+pub(crate) mod wal;

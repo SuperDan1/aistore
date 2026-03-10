@@ -1,5 +1,4 @@
 use crate::heap::Value;
-use crate::types::ColumnType;
 use std::cmp::Ordering;
 
 pub const MAX_KEY_SIZE: usize = 1024;

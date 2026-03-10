@@ -1,12 +1,11 @@
-pub mod btree;
-pub mod key;
-pub mod meta;
+pub(crate) mod btree;
+mod key;
+mod meta;
 
 use crate::buffer::BufferMgr;
 use crate::heap::{RowId, Value};
 use crate::table::Column;
-use crate::types::PageId;
-use crate::vfs::{FileHandle, VfsInterface};
+use crate::vfs::VfsInterface;
 use btree::{create_root_page, BTreeIndex, IndexError, IndexResult};
 use meta::IndexMeta;
 use parking_lot::RwLock;
@@ -209,7 +208,7 @@ impl IndexManager {
         }
 
         let handle = self.vfs.create_file(index_file.to_str().unwrap()).ok();
-        if let Some(mut h) = handle {
+        if let Some(h) = handle {
             h.pwrite(&data, 0)
                 .map_err(|e| IndexError::Other(e.to_string()))?;
         }
