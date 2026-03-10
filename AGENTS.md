@@ -131,6 +131,10 @@ cargo bench --bench hash_bench        # Hash performance
 - [tablespace/AGENTS.md](src/tablespace/AGENTS.md) - Segment-page storage
 - [table/AGENTS.md](src/table/AGENTS.md) - Table metadata & columns
 - [catalog/AGENTS.md](src/catalog/AGENTS.md) - System catalog
+- [page/AGENTS.md](src/page/AGENTS.md) - 8KB page structure
+- [segment/AGENTS.md](src/segment/AGENTS.md) - 64MB segment layout
+- [infrastructure/AGENTS.md](src/infrastructure/AGENTS.md) - Hash/locks/benchmarks
+- [wal/AGENTS.md](src/wal/AGENTS.md) - Write-Ahead Log & recovery
 
 ## STORAGE ENGINE API
 

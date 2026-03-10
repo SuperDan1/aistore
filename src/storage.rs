@@ -715,18 +715,30 @@ impl StorageEngine {
         row_id: RowId,
         snapshot: &crate::types::ReadSnapshot,
     ) -> bool {
+        self.get_visible_before_image(table, row_id, snapshot)
+            .is_some()
+    }
+
+    /// Get visible before_image for a row (for RC: returns before_image when UPDATE tx is active)
+    /// Returns Some(before_image) if visible and has before_image, None otherwise
+    pub fn get_visible_before_image(
+        &mut self,
+        table: &str,
+        row_id: RowId,
+        snapshot: &crate::types::ReadSnapshot,
+    ) -> Option<Vec<u8>> {
         let heap_table = match self.tables.get_mut(table) {
             Some(t) => t,
-            None => return false,
+            None => return None,
         };
 
         let raw_data = match heap_table.get_raw(row_id) {
             Ok(d) => d,
-            Err(_) => return false,
+            Err(_) => return None,
         };
 
         if raw_data.len() < crate::types::RowMVCCHeader::SIZE {
-            return true;
+            return Some(raw_data);
         }
 
         let mut header_bytes = [0u8; 34];
@@ -742,32 +754,25 @@ impl StorageEngine {
             };
 
             if snapshot.is_visible_rc(&version) {
-                return true;
+                return Some(raw_data);
             }
 
             if header.undo_ptr.is_null() {
-                return false;
+                return None;
             }
 
-            // Follow undo chain to find visible version
             let undo_record = match self.undo_mgr.get(&header.undo_ptr) {
                 Ok(r) => r,
-                Err(_) => return false,
+                Err(_) => return None,
             };
 
-            // For UPDATE undo records: if current row's tx is active,
-            // the before_image IS the visible version in RC
             if matches!(undo_record.header.undo_type, crate::types::UndoType::Update) {
                 let undo_tx = undo_record.header.tx_id;
-                // In RC: if the updating tx is active, the before_image is visible
                 if undo_tx != snapshot.tx_id && snapshot.is_active(undo_tx) {
-                    // TODO: Return the before_image data instead of just true
-                    // For now, just mark as visible
-                    return true;
+                    return Some(undo_record.before_image.clone());
                 }
             }
 
-            // Check if undo record's tx is visible
             let undo_version = crate::types::RowVersion {
                 tx_id_created: undo_record.header.tx_id,
                 tx_id_deleted: 0,
@@ -776,12 +781,11 @@ impl StorageEngine {
             };
 
             if snapshot.is_visible_rc(&undo_version) {
-                return true;
+                return Some(undo_record.before_image.clone());
             }
 
-            // Continue following chain to previous undo record
             if undo_record.header.prev_undo_ptr.is_null() {
-                return false;
+                return None;
             }
             header.undo_ptr = undo_record.header.prev_undo_ptr;
         }
