@@ -3,7 +3,7 @@
 //! Contains Page structure definitions for different page types
 //! in the storage engine.
 
-pub mod page;
+pub(crate) mod page;
 
 // Re-export Page struct for easier access
-pub use page::Page;
+pub(crate) use page::Page;

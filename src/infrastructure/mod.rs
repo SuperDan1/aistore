@@ -1,5 +1,5 @@
 // Infrastructure module
 
-pub mod hash;
-pub mod hash_table;
-pub mod lwlock;
+pub(crate) mod hash;
+pub(crate) mod hash_table;
+pub(crate) mod lwlock;
