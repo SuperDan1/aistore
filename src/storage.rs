@@ -990,4 +990,752 @@ mod mvcc_tests {
 
         assert!(is_visible, "Should see value=1 because tx2 was rolled back");
     }
+
+    #[test]
+    fn test_rc_delete_uncommitted() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx1 = storage.begin_transaction();
+        let row_id = storage
+            .insert_with_tx(tx1, "test", vec![Value::Int64(1), Value::Int64(1)])
+            .unwrap();
+        storage.commit(tx1).unwrap();
+
+        let tx2 = storage.begin_transaction();
+        storage.delete_with_tx(tx2, "test", row_id).unwrap();
+
+        let snapshot = storage.create_snapshot(999);
+        let rows = storage.scan_with_snapshot("test", &snapshot).unwrap();
+
+        assert_eq!(
+            rows.len(),
+            0,
+            "Should not see row in scan because delete not committed"
+        );
+
+        storage.abort(tx2).ok();
+    }
+
+    #[test]
+    fn test_rc_delete_committed() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx1 = storage.begin_transaction();
+        let row_id = storage
+            .insert_with_tx(tx1, "test", vec![Value::Int64(1), Value::Int64(1)])
+            .unwrap();
+        storage.commit(tx1).unwrap();
+
+        let tx2 = storage.begin_transaction();
+        storage.delete_with_tx(tx2, "test", row_id).unwrap();
+        storage.commit(tx2).unwrap();
+
+        let snapshot = storage.create_snapshot(999);
+        let is_visible = storage.is_row_visible("test", row_id, &snapshot);
+
+        assert!(!is_visible, "Should not see row because delete committed");
+    }
+
+    #[test]
+    fn test_rc_multiple_transactions() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx1 = storage.begin_transaction();
+        storage
+            .insert_with_tx(tx1, "test", vec![Value::Int64(1), Value::Int64(100)])
+            .unwrap();
+        storage.commit(tx1).unwrap();
+
+        let tx2 = storage.begin_transaction();
+        storage
+            .insert_with_tx(tx2, "test", vec![Value::Int64(2), Value::Int64(200)])
+            .unwrap();
+        storage.commit(tx2).unwrap();
+
+        let tx3 = storage.begin_transaction();
+        storage
+            .insert_with_tx(tx3, "test", vec![Value::Int64(3), Value::Int64(300)])
+            .unwrap();
+        storage.commit(tx3).unwrap();
+
+        let snapshot = storage.create_snapshot(999);
+        let rows = storage.scan_with_snapshot("test", &snapshot).unwrap();
+
+        assert_eq!(rows.len(), 3, "Should see all 3 committed rows");
+    }
+
+    #[test]
+    fn test_rc_own_transaction_visible() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx1 = storage.begin_transaction();
+        let _row_id = storage
+            .insert_with_tx(tx1, "test", vec![Value::Int64(1), Value::Int64(1)])
+            .unwrap();
+
+        let rows = storage.scan("test", None).unwrap();
+        assert!(
+            rows.len() > 0,
+            "Own uncommitted insert should be visible in scan"
+        );
+
+        storage.commit(tx1).unwrap();
+    }
+
+    #[test]
+    fn test_rc_after_commit_visibility() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx1 = storage.begin_transaction();
+        let row_id = storage
+            .insert_with_tx(tx1, "test", vec![Value::Int64(1), Value::Int64(1)])
+            .unwrap();
+        storage.commit(tx1).unwrap();
+
+        let snapshot = storage.create_snapshot(tx1);
+        let is_visible = storage.is_row_visible("test", row_id, &snapshot);
+
+        assert!(
+            is_visible,
+            "Committed row should be visible to new transaction"
+        );
+    }
+}
+
+#[cfg(test)]
+mod acid_tests {
+    use super::*;
+
+    fn create_test_engine() -> StorageEngine {
+        let tmp_dir = std::env::temp_dir().join(format!("acid_test_{}", std::process::id()));
+        std::fs::create_dir_all(&tmp_dir).ok();
+        StorageEngine::new(&tmp_dir).unwrap()
+    }
+
+    #[test]
+    fn test_atomicity_insert() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx = storage.begin_transaction();
+        storage
+            .insert_with_tx(tx, "test", vec![Value::Int64(1), Value::Int64(100)])
+            .unwrap();
+        storage.commit(tx).unwrap();
+
+        let rows = storage.scan("test", None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_atomicity_update() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx1 = storage.begin_transaction();
+        let row_id = storage
+            .insert_with_tx(tx1, "test", vec![Value::Int64(1), Value::Int64(100)])
+            .unwrap();
+        storage.commit(tx1).unwrap();
+
+        let tx2 = storage.begin_transaction();
+        storage
+            .update_with_tx(
+                tx2,
+                "test",
+                row_id,
+                vec![Value::Int64(1), Value::Int64(200)],
+            )
+            .unwrap();
+        storage.commit(tx2).unwrap();
+
+        let rows = storage.scan("test", None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_atomicity_delete() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx1 = storage.begin_transaction();
+        let row_id = storage
+            .insert_with_tx(tx1, "test", vec![Value::Int64(1), Value::Int64(100)])
+            .unwrap();
+        storage.commit(tx1).unwrap();
+
+        let tx2 = storage.begin_transaction();
+        storage.delete_with_tx(tx2, "test", row_id).unwrap();
+        storage.commit(tx2).unwrap();
+
+        let rows = storage.scan("test", None).unwrap();
+        assert_eq!(rows.len(), 0);
+    }
+
+    #[test]
+    fn test_atomicity_rollback() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx1 = storage.begin_transaction();
+        storage
+            .insert_with_tx(tx1, "test", vec![Value::Int64(1), Value::Int64(100)])
+            .unwrap();
+        storage.commit(tx1).unwrap();
+
+        let tx2 = storage.begin_transaction();
+        let row_id = RowId::new(1, 0);
+        storage
+            .update_with_tx(
+                tx2,
+                "test",
+                row_id,
+                vec![Value::Int64(1), Value::Int64(200)],
+            )
+            .unwrap();
+        storage.abort(tx2).unwrap();
+
+        let rows = storage.scan("test", None).unwrap();
+        assert_eq!(rows.len(), 1, "Rolled back update should not change data");
+    }
+
+    #[test]
+    fn test_consistency_constraints() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx = storage.begin_transaction();
+        let row_id = storage
+            .insert_with_tx(tx, "test", vec![Value::Int64(1), Value::Int64(100)])
+            .unwrap();
+        storage.commit(tx).unwrap();
+
+        let snapshot = storage.create_snapshot(tx);
+        let is_visible = storage.is_row_visible("test", row_id, &snapshot);
+        assert!(is_visible, "Inserted row should be visible");
+    }
+
+    #[test]
+    fn test_isolation_dirty_read_prevented() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx1 = storage.begin_transaction();
+        storage
+            .insert_with_tx(tx1, "test", vec![Value::Int64(1), Value::Int64(100)])
+            .unwrap();
+
+        let snapshot = storage.create_snapshot(999);
+        let rows = storage.scan_with_snapshot("test", &snapshot).unwrap();
+
+        assert_eq!(rows.len(), 0, "Dirty read should be prevented");
+
+        storage.abort(tx1).ok();
+    }
+
+    #[test]
+    fn test_isolation_serializable_like() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx1 = storage.begin_transaction();
+        storage
+            .insert_with_tx(tx1, "test", vec![Value::Int64(1), Value::Int64(100)])
+            .unwrap();
+        storage.commit(tx1).unwrap();
+
+        let tx2 = storage.begin_transaction();
+        storage
+            .insert_with_tx(tx2, "test", vec![Value::Int64(2), Value::Int64(200)])
+            .unwrap();
+        storage.commit(tx2).unwrap();
+
+        let rows = storage.scan("test", None).unwrap();
+        assert_eq!(rows.len(), 2);
+    }
+
+    #[test]
+    fn test_durability_commit_persisted() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx = storage.begin_transaction();
+        storage
+            .insert_with_tx(tx, "test", vec![Value::Int64(1), Value::Int64(100)])
+            .unwrap();
+        storage.commit(tx).unwrap();
+
+        let rows = storage.scan("test", None).unwrap();
+        assert_eq!(rows.len(), 1, "Committed data should be durable");
+    }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+
+    fn create_test_engine() -> StorageEngine {
+        let tmp_dir = std::env::temp_dir().join(format!("integration_test_{}", std::process::id()));
+        std::fs::create_dir_all(&tmp_dir).ok();
+        StorageEngine::new(&tmp_dir).unwrap()
+    }
+
+    #[test]
+    fn test_full_workflow() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "users",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "name".to_string(),
+                        crate::types::ColumnType::Varchar(100),
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx = storage.begin_transaction();
+        let row_id = storage
+            .insert_with_tx(
+                tx,
+                "users",
+                vec![Value::Int64(1), Value::VarChar("Alice".to_string())],
+            )
+            .unwrap();
+        storage.commit(tx).unwrap();
+
+        let rows = storage.scan("users", None).unwrap();
+        assert_eq!(rows.len(), 1);
+
+        let tx = storage.begin_transaction();
+        storage
+            .update_with_tx(
+                tx,
+                "users",
+                row_id,
+                vec![Value::Int64(1), Value::VarChar("Bob".to_string())],
+            )
+            .unwrap();
+        storage.commit(tx).unwrap();
+
+        let tx = storage.begin_transaction();
+        storage.delete_with_tx(tx, "users", row_id).unwrap();
+        storage.commit(tx).unwrap();
+
+        let rows = storage.scan("users", None).unwrap();
+        assert_eq!(rows.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_tables() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "table1",
+                vec![Column::new(
+                    "id".to_string(),
+                    crate::types::ColumnType::Int64,
+                    false,
+                    0,
+                )],
+            )
+            .unwrap();
+
+        storage
+            .create_table(
+                "table2",
+                vec![Column::new(
+                    "id".to_string(),
+                    crate::types::ColumnType::Int64,
+                    false,
+                    0,
+                )],
+            )
+            .unwrap();
+
+        let tx1 = storage.begin_transaction();
+        storage
+            .insert_with_tx(tx1, "table1", vec![Value::Int64(1)])
+            .unwrap();
+        storage.commit(tx1).unwrap();
+
+        let tx2 = storage.begin_transaction();
+        storage
+            .insert_with_tx(tx2, "table2", vec![Value::Int64(2)])
+            .unwrap();
+        storage.commit(tx2).unwrap();
+
+        let rows1 = storage.scan("table1", None).unwrap();
+        let rows2 = storage.scan("table2", None).unwrap();
+
+        assert_eq!(rows1.len(), 1);
+        assert_eq!(rows2.len(), 1);
+    }
+
+    #[test]
+    fn test_crud_all_column_types() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new(
+                        "c_int64".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        0,
+                    ),
+                    Column::new(
+                        "c_varchar".to_string(),
+                        crate::types::ColumnType::Varchar(100),
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx = storage.begin_transaction();
+        storage
+            .insert_with_tx(
+                tx,
+                "test",
+                vec![Value::Int64(42), Value::VarChar("test string".to_string())],
+            )
+            .unwrap();
+        storage.commit(tx).unwrap();
+
+        let rows = storage.scan("test", None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_scan_with_filter() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![
+                    Column::new("id".to_string(), crate::types::ColumnType::Int64, false, 0),
+                    Column::new(
+                        "value".to_string(),
+                        crate::types::ColumnType::Int64,
+                        false,
+                        1,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let tx = storage.begin_transaction();
+        for i in 1..=10 {
+            storage
+                .insert_with_tx(tx, "test", vec![Value::Int64(i), Value::Int64(i * 10)])
+                .unwrap();
+        }
+        storage.commit(tx).unwrap();
+
+        let rows = storage.scan("test", None).unwrap();
+        assert_eq!(rows.len(), 10);
+    }
+
+    #[test]
+    fn test_scan_empty_table() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "empty",
+                vec![Column::new(
+                    "id".to_string(),
+                    crate::types::ColumnType::Int64,
+                    false,
+                    0,
+                )],
+            )
+            .unwrap();
+
+        let rows = storage.scan("empty", None).unwrap();
+        assert_eq!(rows.len(), 0);
+    }
+
+    #[test]
+    fn test_bulk_insert() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![Column::new(
+                    "id".to_string(),
+                    crate::types::ColumnType::Int64,
+                    false,
+                    0,
+                )],
+            )
+            .unwrap();
+
+        let tx = storage.begin_transaction();
+        for i in 1..=100 {
+            storage
+                .insert_with_tx(tx, "test", vec![Value::Int64(i)])
+                .unwrap();
+        }
+        storage.commit(tx).unwrap();
+
+        let rows = storage.scan("test", None).unwrap();
+        assert_eq!(rows.len(), 100);
+    }
+
+    #[test]
+    fn test_drop_table() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![Column::new(
+                    "id".to_string(),
+                    crate::types::ColumnType::Int64,
+                    false,
+                    0,
+                )],
+            )
+            .unwrap();
+
+        let tx = storage.begin_transaction();
+        storage
+            .insert_with_tx(tx, "test", vec![Value::Int64(1)])
+            .unwrap();
+        storage.commit(tx).unwrap();
+
+        storage.drop_table("test").unwrap();
+
+        let result = storage.scan("test", None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_duplicate_table_name() {
+        let mut storage = create_test_engine();
+
+        storage
+            .create_table(
+                "test",
+                vec![Column::new(
+                    "id".to_string(),
+                    crate::types::ColumnType::Int64,
+                    false,
+                    0,
+                )],
+            )
+            .unwrap();
+
+        let result = storage.create_table(
+            "test",
+            vec![Column::new(
+                "id".to_string(),
+                crate::types::ColumnType::Int64,
+                false,
+                0,
+            )],
+        );
+
+        assert!(result.is_err());
+    }
 }
