@@ -662,3 +662,6 @@ impl HeapTable {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

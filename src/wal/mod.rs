@@ -10,6 +10,9 @@ pub mod log_record;
 pub mod lsn;
 pub mod recovery;
 
+#[cfg(test)]
+mod tests;
+
 use checkpoint::CheckpointManager;
 use config::WalConfig;
 use log_buffer::LogBuffer;

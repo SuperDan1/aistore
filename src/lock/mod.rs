@@ -7,6 +7,9 @@ pub mod row_lock;
 pub mod table_lock;
 pub mod transaction;
 
+#[cfg(test)]
+mod tests;
+
 pub use deadlock::DeadlockDetector;
 pub use row_lock::{RowId as LockRowId, RowLockManager};
 pub use table_lock::TableLockManager;
