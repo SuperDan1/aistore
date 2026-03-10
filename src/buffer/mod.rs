@@ -795,4 +795,10 @@ mod tests {
         assert_eq!(desc.pin_count(), 0);
         assert!(desc.can_evict());
     }
+
+    #[test]
+    fn test_buffer_tag_new() {
+        let tag = BufferTag::new(100);
+        assert_eq!(tag.page_id, 100);
+    }
 }

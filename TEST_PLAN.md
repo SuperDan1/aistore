@@ -1,6 +1,6 @@
 # Aistore 测试计划
 
-**版本:** 1.1  
+**版本:** 1.2  
 **日期:** 2026-03-10  
 **目标:** 80%+ 测试覆盖率, MVCC + ACID 验证
 
@@ -10,10 +10,10 @@
 
 | 指标 | 当前值 | 目标值 |
 |------|--------|--------|
-| 总测试数 | **171** | 300+ |
-| 模块测试文件 | 9 | 20+ |
+| 总测试数 | **200** | 300+ |
+| 模块测试文件 | 12 | 20+ |
 | 并发测试 | 5 | 30+ |
-| 集成测试 | 4 | 50+ |
+| 集成测试 | 25 | 50+ |
 
 ### 已完成测试分布
 
@@ -29,8 +29,10 @@
 | infrastructure | hash/tests.rs, hash_table/tests.rs | 15 | ✅ |
 | wal | wal/tests.rs, lsn/tests.rs | 22 | ✅ |
 | lock | lock/tests.rs | **40** | ✅ 新增 |
-| mvcc | storage.rs (内联) | 4 | ✅ |
-| storage | storage.rs (内联) | 4 | ✅ |
+| heap | heap/tests.rs | 8 | ✅ 新增 |
+| mvcc | storage.rs (内联) | **10** | ✅ 新增 |
+| storage (ACID) | storage.rs (内联) | **8** | ✅ 新增 |
+| storage (集成) | storage.rs (内联) | **8** | ✅ 新增 |
 
 ---
 

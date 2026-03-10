@@ -476,4 +476,85 @@ mod concurrency_tests {
 
         assert_eq!(mgr.get_max_committed_tx(), tx3);
     }
+
+    #[test]
+    fn test_concurrent_lock_contention() {
+        let mgr = Arc::new(LockManager::new());
+
+        let mgr1 = mgr.clone();
+        let handle1 = thread::spawn(move || {
+            let tx = mgr1.begin();
+            mgr1.lock_row(tx, "test", 1, 0, LockMode::Exclusive)
+                .unwrap();
+            thread::sleep(Duration::from_millis(50));
+            mgr1.commit(tx)
+        });
+
+        let mgr2 = mgr.clone();
+        let handle2 = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            let tx = mgr2.begin();
+            let result = mgr2.lock_row(tx, "test", 1, 0, LockMode::Shared);
+            if result.is_ok() {
+                mgr2.commit(tx).ok();
+            }
+            result
+        });
+
+        let result1 = handle1.join().unwrap();
+        let result2 = handle2.join().unwrap();
+
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
+    }
+
+    #[test]
+    fn test_concurrent_table_lock() {
+        let mgr = Arc::new(LockManager::new());
+
+        let mgr1 = mgr.clone();
+        let handle1 = thread::spawn(move || {
+            let tx = mgr1.begin();
+            mgr1.lock_table(tx, "users", LockMode::Exclusive).unwrap();
+            thread::sleep(Duration::from_millis(50));
+            mgr1.commit(tx)
+        });
+
+        let mgr2 = mgr.clone();
+        let handle2 = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            let tx = mgr2.begin();
+            mgr2.lock_table(tx, "users", LockMode::Exclusive)
+        });
+
+        let result1 = handle1.join().unwrap();
+        let result2 = handle2.join().unwrap();
+
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
+    }
+
+    #[test]
+    fn test_concurrent_mixed_operations() {
+        let mgr = Arc::new(LockManager::new());
+
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                let mgr = mgr.clone();
+                thread::spawn(move || {
+                    let tx = mgr.begin();
+                    if i % 2 == 0 {
+                        mgr.lock_row(tx, "test", 1, i, LockMode::Shared).ok();
+                    } else {
+                        mgr.lock_table(tx, "test", LockMode::Shared).ok();
+                    }
+                    mgr.commit(tx).ok();
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
 }
