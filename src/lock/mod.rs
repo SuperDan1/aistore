@@ -2,26 +2,27 @@
 //!
 //! Provides transaction management and locking for ACID compliance.
 
-pub mod deadlock;
-pub mod row_lock;
-pub mod table_lock;
-pub mod transaction;
+mod deadlock;
+mod row_lock;
+mod table_lock;
+mod transaction;
 
 #[cfg(test)]
 mod tests;
 
-pub use deadlock::DeadlockDetector;
-pub use row_lock::{RowId as LockRowId, RowLockManager};
-pub use table_lock::TableLockManager;
-pub use transaction::{
-    LockError, LockMode, LockResult, Transaction, TransactionId, TransactionManager, TxStatus,
-};
+pub(crate) use deadlock::DeadlockDetector;
+pub(crate) use row_lock::{RowId as LockRowId, RowLockManager};
+pub(crate) use table_lock::TableLockManager;
+pub(crate) use transaction::{LockError, LockMode, LockResult, TransactionId, TransactionManager};
 
-use crate::types::{TransactionId as TxId, UndoPtr};
+#[cfg(test)]
+pub(crate) use transaction::TxStatus;
+
+use crate::types::UndoPtr;
 use std::time::Duration;
 
 /// Unified Lock Manager
-pub struct LockManager {
+pub(crate) struct LockManager {
     tx_manager: TransactionManager,
     row_locks: RowLockManager,
     table_locks: TableLockManager,

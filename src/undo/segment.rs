@@ -4,9 +4,8 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 use super::error::{UndoError, UndoResult};
-use super::UNDO_PAGE_SIZE;
 
-pub struct UndoSegment {
+pub(crate) struct UndoSegment {
     segment_id: u32,
     file: File,
     file_size: usize,

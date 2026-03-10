@@ -4,7 +4,6 @@ use super::{LockError, LockMode, LockResult, TransactionId};
 use crate::types::PageId;
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Row identifier (table + page + slot)
@@ -197,7 +196,6 @@ impl RowLockManager {
 
     /// Get all locks held by a transaction
     pub fn get_locks(&self, tx_id: TransactionId) -> Vec<RowId> {
-        let locks = self.locks.read();
         let locks = self.locks.read();
         locks
             .iter()

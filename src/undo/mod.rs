@@ -3,20 +3,19 @@
 mod error;
 mod segment;
 
-pub use error::{UndoError, UndoResult};
-pub use segment::UndoSegment;
+pub(crate) use error::{UndoError, UndoResult};
+pub(crate) use segment::UndoSegment;
 
 use crate::types::{PageId, TransactionId, UndoPtr, UndoRecord, UndoRecordHeader, UndoType, LSN};
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
 const UNDO_SEGMENT_SIZE: usize = 64 * 1024 * 1024;
 const UNDO_PAGE_SIZE: usize = 8192;
 const UNDO_FILE_PREFIX: &str = "undo_";
 const UNDO_FILE_EXT: &str = "seg";
 
-pub struct UndoManager {
+pub(crate) struct UndoManager {
     tablespace_path: PathBuf,
     segments: RwLock<Vec<UndoSegment>>,
     current_segment_id: RwLock<u32>,

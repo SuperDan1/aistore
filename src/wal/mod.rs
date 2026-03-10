@@ -2,13 +2,13 @@
 //!
 //! This module provides WAL functionality for the storage engine.
 
-pub mod checkpoint;
-pub mod config;
-pub mod log_buffer;
-pub mod log_file;
-pub mod log_record;
-pub mod lsn;
-pub mod recovery;
+pub(crate) mod checkpoint;
+pub(crate) mod config;
+mod log_buffer;
+mod log_file;
+mod log_record;
+mod lsn;
+mod recovery;
 
 #[cfg(test)]
 mod tests;

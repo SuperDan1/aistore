@@ -1,15 +1,14 @@
-pub mod error;
+mod error;
 
 use crate::heap::{HeapTable, RowId, Tuple, Value};
 use crate::lock::{LockManager, LockMode, TransactionId};
 use crate::types::{
-    IsolationLevel, MvccError, MvccResult, ReadSnapshot, RowMVCCHeader, RowVersion,
-    TransactionId as TxId, UndoPtr, UndoRecord, UndoType, LSN,
+    IsolationLevel, MvccError, MvccResult, ReadSnapshot, RowVersion, UndoPtr, UndoType,
 };
 use crate::undo::UndoManager;
 use std::sync::Arc;
 
-pub struct MvccManager {
+pub(crate) struct MvccManager {
     lock_mgr: Arc<LockManager>,
     undo_mgr: Arc<UndoManager>,
 }
@@ -127,7 +126,7 @@ impl MvccManager {
         table_id: u32,
         heap_table: &mut HeapTable,
         row_id: &RowId,
-        columns: &[crate::table::Column],
+        _columns: &[crate::table::Column],
     ) -> MvccResult<()> {
         self.lock_mgr
             .lock_row(
@@ -178,7 +177,7 @@ impl MvccManager {
             .map_err(|e| MvccError::Other(e.to_string()))?;
 
         for record in records {
-            let row_id = RowId::new(record.header.row_page_id, record.header.row_slot_idx);
+            let _row_id = RowId::new(record.header.row_page_id, record.header.row_slot_idx);
 
             match record.header.undo_type {
                 UndoType::Insert => {
