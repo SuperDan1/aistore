@@ -9,7 +9,7 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub type HeapResult<T> = Result<T, HeapError>;
+type HeapResult<T> = Result<T, HeapError>;
 
 #[derive(Debug, Clone)]
 pub enum HeapError {
@@ -227,12 +227,12 @@ impl Tuple {
         }
 
         // Check for MVCC header and skip it if present
-        let (actual_data, has_mvcc) = if data.len() >= RowMVCCHeader::SIZE
+        let actual_data = if data.len() >= RowMVCCHeader::SIZE
             && data.len() >= RowMVCCHeader::SIZE + columns.len() / 8 + 4
         {
-            (&data[RowMVCCHeader::SIZE..], true)
+            &data[RowMVCCHeader::SIZE..]
         } else {
-            (data, false)
+            data
         };
 
         let null_bitmap_size = (columns.len() + 7) / 8;
@@ -271,7 +271,7 @@ impl Tuple {
 }
 
 #[derive(Clone)]
-pub struct HeapPage {
+struct HeapPage {
     page_id: PageId,
     data: [u8; PAGE_SIZE],
     slot_count: usize,
@@ -376,7 +376,7 @@ impl HeapPage {
     }
 }
 
-pub struct HeapTable {
+pub(crate) struct HeapTable {
     table: Arc<Table>,
     buffer_mgr: Arc<RwLock<BufferMgr>>,
     first_page_id: PageId,
@@ -541,7 +541,7 @@ impl HeapTable {
                             for page_id in page_ids {
                                 let page = self.fetch_page(page_id)?;
 
-                                for (slot_idx, data) in page.iter_tuples() {
+                                for (_slot_idx, data) in page.iter_tuples() {
                                     let is_visible = if data.len() >= RowMVCCHeader::SIZE {
                                         let mut header_bytes = [0u8; 34];
                                         header_bytes.copy_from_slice(&data[..34]);

@@ -8,8 +8,6 @@ use crate::heap::{HeapTable, RowId, Tuple, Value};
 use crate::index::IndexManager;
 use crate::lock::{LockManager, LockMode, TransactionId};
 use crate::table::Column;
-use crate::types::PAGE_SIZE;
-use crate::undo::UndoManager;
 use crate::wal::WalManager;
 use parking_lot::RwLock;
 use std::collections::HashMap;

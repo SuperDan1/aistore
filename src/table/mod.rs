@@ -5,16 +5,18 @@
 //! - System cache (syscache) for quick table lookups
 //! - Table creation with automatic segment allocation
 
-pub mod builder;
-pub mod column;
-pub mod syscache;
-pub mod table;
+mod builder;
+mod column;
+mod syscache;
+mod table;
 
-pub use builder::TableBuilder;
-pub use column::Column;
-pub use syscache::SysCache;
-pub use table::Table;
-pub use table::TableType;
+pub(crate) use builder::TableBuilder;
+pub(crate) use column::Column;
+pub(crate) use table::Table;
+pub(crate) use table::TableType;
+
+#[cfg(test)]
+pub(crate) use syscache::SysCache;
 
 #[cfg(test)]
 mod tests {

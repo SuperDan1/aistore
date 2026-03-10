@@ -8,14 +8,14 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub mod error;
+mod error;
 
 #[derive(Debug, Clone)]
 struct TableEntry {
     table: Arc<Table>,
 }
 
-pub struct Catalog {
+pub(crate) struct Catalog {
     data_dir: PathBuf,
     system_dir: PathBuf,
     column_table_path: PathBuf,
