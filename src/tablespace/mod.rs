@@ -1,6 +1,6 @@
 //! Tablespace and Segment storage implementation
 
-pub mod segment;
+pub(crate) mod segment;
 
 use crate::types::Timestamp;
 use crc32fast;

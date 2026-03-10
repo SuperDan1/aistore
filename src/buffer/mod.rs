@@ -3,12 +3,9 @@
 //! Provides page caching, LRU-based replacement, dirty page tracking,
 //! and VFS-based disk I/O.
 
-pub mod double_write;
-pub mod flusher;
-pub mod lru;
-
-pub use double_write::DoubleWriteBuffer;
-pub use flusher::{FlushPolicy, PageFlusher};
+pub(crate) mod double_write;
+pub(crate) mod flusher;
+pub(crate) mod lru;
 
 use crate::infrastructure::hash::fnv1a_hash;
 use crate::page::Page;
@@ -22,7 +19,7 @@ use std::sync::Arc;
 use std::{fmt, mem};
 
 /// Invalid page ID constant
-pub const INVALID_PAGE_ID: PageId = PageId::MAX;
+const INVALID_PAGE_ID: PageId = PageId::MAX;
 
 /// State bit layout (64-bit AtomicU64):
 ///
@@ -40,9 +37,9 @@ const PIN_COUNT_SHIFT: u8 = 8;
 
 /// BufferTag encapsulates a PageId for buffer identification
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BufferTag {
+struct BufferTag {
     /// The PageId this buffer contains
-    pub page_id: PageId,
+    page_id: PageId,
 }
 
 impl BufferTag {
@@ -79,15 +76,15 @@ impl HashEntry {
 /// Aligned to cache line size to prevent false sharing
 #[cfg_attr(any(target_arch = "x86", target_arch = "x86_64"), repr(align(64)))]
 #[cfg_attr(any(target_arch = "arm", target_arch = "aarch64"), repr(align(128)))]
-pub struct BufferDesc {
+struct BufferDesc {
     /// Buffer tag
-    pub buf_tag: BufferTag,
+    buf_tag: BufferTag,
     /// 64-bit atomic state variable (dirty bit + pin count)
     state: AtomicU64,
     /// Read-write lock for controlling concurrent I/O access
-    pub io_in_progress_lock: std::sync::RwLock<()>,
+    io_in_progress_lock: std::sync::RwLock<()>,
     /// Lock for content access (serializes modifications)
-    pub content_lock: std::sync::RwLock<()>,
+    content_lock: std::sync::RwLock<()>,
 }
 
 impl BufferDesc {
@@ -179,7 +176,7 @@ impl BufferDesc {
 
 /// Buffer manager errors
 #[derive(Debug, PartialEq)]
-pub enum BufferError {
+pub(crate) enum BufferError {
     /// Page not found in buffer pool
     PageNotFound(PageId),
     /// Buffer pool is full
@@ -210,7 +207,7 @@ impl From<VfsError> for BufferError {
 }
 
 /// Buffer manager struct
-pub struct BufferMgr {
+pub(crate) struct BufferMgr {
     /// Buffer pool size
     buffer_size: usize,
     /// Pointer to an array of BufferDesc structures

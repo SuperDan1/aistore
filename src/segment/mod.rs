@@ -20,25 +20,25 @@ use std::sync::RwLock;
 // ============================================================================
 
 /// File magic number ("ASTR" in little endian)
-pub const FILE_MAGIC: u32 = 0x41535452;
+const FILE_MAGIC: u32 = 0x41535452;
 
 /// File version
-pub const FILE_VERSION: u32 = 1;
+const FILE_VERSION: u32 = 1;
 
 /// Extent size (1MB)
-pub const EXTENT_SIZE: usize = 1 << 20; // 1MB
+const EXTENT_SIZE: usize = 1 << 20; // 1MB
 
 /// Number of pages per extent
-pub const EXTENT_PAGE_COUNT: u32 = 128;
+const EXTENT_PAGE_COUNT: u32 = 128;
 
 /// Number of usable pages per extent (excluding header page)
-pub const EXTENT_USABLE_PAGES: u32 = EXTENT_PAGE_COUNT - 1; // 127
+const EXTENT_USABLE_PAGES: u32 = EXTENT_PAGE_COUNT - 1; // 127
 
 /// Segment header size
-pub const SEGMENT_HEADER_SIZE: usize = 24;
+const SEGMENT_HEADER_SIZE: usize = 24;
 
 /// File header size
-pub const FILE_HEADER_SIZE: usize = 24;
+const FILE_HEADER_SIZE: usize = 24;
 
 // ============================================================================
 // Segment Type
@@ -46,7 +46,7 @@ pub const FILE_HEADER_SIZE: usize = 24;
 
 /// Segment type enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SegmentType {
+enum SegmentType {
     /// Generic segment (current implementation)
     Generic,
     /// Data segment (future implementation)
@@ -76,7 +76,7 @@ impl fmt::Display for SegmentType {
 /// Located at the beginning of the file (offset 0)
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
-pub struct FileHeader {
+struct FileHeader {
     /// Magic number for file validation
     pub magic: u32,
     /// File version number
@@ -138,7 +138,7 @@ impl FileHeader {
 /// Located at the first page of each extent (Page 0, not counted as usable page)
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
-pub struct ExtentHeader {
+struct ExtentHeader {
     /// Pointer to the next extent header (0 means none)
     pub next_extent_ptr: u64,
 }
@@ -171,7 +171,7 @@ impl ExtentHeader {
 /// Located at the first page of the first extent of the segment (Page 0)
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
-pub struct SegmentHeader {
+struct SegmentHeader {
     /// Segment ID
     pub segment_id: u64,
     /// Segment type
@@ -226,7 +226,7 @@ impl SegmentHeader {
 
 /// Segment-related errors
 #[derive(Debug)]
-pub enum SegmentError {
+enum SegmentError {
     /// Segment not found
     #[allow(dead_code)]
     NotFound(SegmentId),
@@ -291,14 +291,14 @@ impl From<std::io::Error> for SegmentError {
 }
 
 /// Result type for segment operations
-pub type SegmentResult<T> = Result<T, SegmentError>;
+type SegmentResult<T> = Result<T, SegmentError>;
 
 // ============================================================================
 // Segment Manager
 // ============================================================================
 
 /// Segment manager for managing segment storage
-pub struct SegmentManager {
+struct SegmentManager {
     /// File handle (opened for read/write)
     file_handle: Arc<RwLock<File>>,
     /// File header cached in memory
