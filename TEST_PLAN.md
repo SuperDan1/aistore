@@ -1,6 +1,6 @@
 # Aistore 测试计划
 
-**版本:** 1.2  
+**版本:** 1.3  
 **日期:** 2026-03-10  
 **目标:** 80%+ 测试覆盖率, MVCC + ACID 验证
 
@@ -10,29 +10,29 @@
 
 | 指标 | 当前值 | 目标值 |
 |------|--------|--------|
-| 总测试数 | **200** | 300+ |
-| 模块测试文件 | 12 | 20+ |
-| 并发测试 | 5 | 30+ |
+| 总测试数 | **204** | 300+ |
+| 模块测试文件 | 13 | 20+ |
+| 并发测试 | 10 | 30+ |
 | 集成测试 | 25 | 50+ |
 
 ### 已完成测试分布
 
 | 模块 | 测试文件 | 测试数 | 状态 |
 |------|----------|--------|------|
-| buffer | buffer/tests.rs | 9 | ✅ |
+| buffer | buffer/mod.rs (inline) | 12 | ✅ |
 | catalog | catalog/tests.rs | 12 | ✅ |
 | vfs | vfs/tests.rs | 5 | ✅ |
 | table | table/tests.rs | 3 | ✅ |
 | page | page/tests.rs | 2 | ✅ |
 | segment | segment/tests.rs | 4 | ✅ |
-| index | index/*tests* | 3 | ✅ |
+| index | index/tests.rs | **14** | ✅ 新增 |
 | infrastructure | hash/tests.rs, hash_table/tests.rs | 15 | ✅ |
 | wal | wal/tests.rs, lsn/tests.rs | 22 | ✅ |
-| lock | lock/tests.rs | **40** | ✅ 新增 |
-| heap | heap/tests.rs | 8 | ✅ 新增 |
-| mvcc | storage.rs (内联) | **10** | ✅ 新增 |
-| storage (ACID) | storage.rs (内联) | **8** | ✅ 新增 |
-| storage (集成) | storage.rs (内联) | **8** | ✅ 新增 |
+| lock | lock/tests.rs | **43** | ✅ |
+| heap | heap/tests.rs | 8 | ✅ |
+| storage (MVCC) | storage.rs | 10 | ✅ |
+| storage (ACID) | storage.rs | 8 | ✅ |
+| storage (集成) | storage.rs | 8 | ✅ |
 
 ---
 
