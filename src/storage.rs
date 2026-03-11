@@ -2,6 +2,7 @@
 //!
 //! Provides a simple table-oriented storage API for benchmarks and applications.
 
+use crate::buffer::flusher::PageFlusher;
 use crate::buffer::BufferMgr;
 use crate::catalog::Catalog;
 use crate::heap::{HeapTable, RowId, Tuple, Value};
@@ -66,9 +67,10 @@ pub struct StorageEngine {
     buffer_mgr: Arc<RwLock<BufferMgr>>,
     tables: HashMap<String, HeapTable>,
     lock_mgr: Arc<crate::lock::LockManager>,
-    wal: Option<WalManager>,
+    wal: Option<Arc<WalManager>>,
     index_mgr: IndexManager,
     undo_mgr: Arc<crate::undo::UndoManager>,
+    flusher: Option<PageFlusher>,
 }
 
 impl StorageEngine {
@@ -90,7 +92,13 @@ impl StorageEngine {
         let lock_mgr = LockManager::new();
         let lock_mgr_ref = Arc::new(lock_mgr);
 
-        let wal = WalManager::new(data_dir.clone(), vfs.clone()).ok();
+        let wal = WalManager::new(data_dir.clone(), vfs.clone())
+            .ok()
+            .map(Arc::new);
+
+        if let Some(ref wal) = wal {
+            let _ = wal.recover();
+        }
 
         let index_mgr = IndexManager::new(
             Arc::clone(&buffer_mgr),
@@ -102,6 +110,12 @@ impl StorageEngine {
             data_dir.to_str().unwrap_or("./data"),
         ));
 
+        let flusher = wal.as_ref().map(|w| {
+            let f = PageFlusher::new(Arc::clone(&buffer_mgr), Some(Arc::clone(w)), 1000, 0.1);
+            f.start();
+            f
+        });
+
         Ok(Self {
             catalog: Arc::new(catalog),
             buffer_mgr,
@@ -110,6 +124,7 @@ impl StorageEngine {
             wal,
             index_mgr,
             undo_mgr,
+            flusher,
         })
     }
 
