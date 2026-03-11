@@ -65,7 +65,7 @@ pub struct StorageEngine {
     catalog: Arc<Catalog>,
     buffer_mgr: Arc<RwLock<BufferMgr>>,
     tables: HashMap<String, HeapTable>,
-    lock_mgr: LockManager,
+    lock_mgr: Arc<crate::lock::LockManager>,
     wal: Option<WalManager>,
     index_mgr: IndexManager,
     undo_mgr: Arc<crate::undo::UndoManager>,
@@ -88,10 +88,15 @@ impl StorageEngine {
         )));
 
         let lock_mgr = LockManager::new();
+        let lock_mgr_ref = Arc::new(lock_mgr);
 
         let wal = WalManager::new(data_dir.clone(), vfs.clone()).ok();
 
-        let index_mgr = IndexManager::new(Arc::clone(&buffer_mgr), data_dir.clone());
+        let index_mgr = IndexManager::new(
+            Arc::clone(&buffer_mgr),
+            Arc::clone(&lock_mgr_ref),
+            data_dir.clone(),
+        );
 
         let undo_mgr = Arc::new(crate::undo::UndoManager::new(
             data_dir.to_str().unwrap_or("./data"),
@@ -101,7 +106,7 @@ impl StorageEngine {
             catalog: Arc::new(catalog),
             buffer_mgr,
             tables: HashMap::new(),
-            lock_mgr,
+            lock_mgr: lock_mgr_ref,
             wal,
             index_mgr,
             undo_mgr,
@@ -142,6 +147,8 @@ impl StorageEngine {
 
     /// Insert a row (without transaction)
     pub fn insert(&mut self, table: &str, values: Vec<Value>) -> StorageResult<RowId> {
+        let tx_id = self.lock_mgr.begin();
+
         let heap_table = self
             .tables
             .get_mut(table)
@@ -151,13 +158,14 @@ impl StorageEngine {
             .insert(&values)
             .map_err(|e| StorageError::Other(e.to_string()))?;
 
-        self.maintain_index_insert(table, &values, row_id)?;
+        self.maintain_index_insert(tx_id, table, &values, row_id)?;
 
         Ok(row_id)
     }
 
     fn maintain_index_insert(
         &mut self,
+        tx_id: TransactionId,
         table: &str,
         values: &[Value],
         row_id: RowId,
@@ -180,7 +188,7 @@ impl StorageEngine {
         };
 
         for id in index_ids {
-            if let Err(e) = self.index_mgr.insert(id, values, &columns, row_id) {
+            if let Err(e) = self.index_mgr.insert(tx_id, id, values, &columns, row_id) {
                 return Err(StorageError::Other(format!("Index insert failed: {}", e)));
             }
         }
@@ -223,7 +231,7 @@ impl StorageEngine {
             .insert_raw(&data)
             .map_err(|e| StorageError::Other(e.to_string()))?;
 
-        self.maintain_index_insert(table, &values, row_id)?;
+        self.maintain_index_insert(tx_id, table, &values, row_id)?;
 
         self.lock_mgr
             .lock_row(
@@ -331,6 +339,8 @@ impl StorageEngine {
 
     /// Update a row (without transaction)
     pub fn update(&mut self, table: &str, row_id: RowId, values: Vec<Value>) -> StorageResult<()> {
+        let tx_id = self.lock_mgr.begin();
+
         let (old_values, columns_clone, index_ids) = {
             let mut heap_table = self
                 .tables
@@ -353,9 +363,9 @@ impl StorageEngine {
             let index_ids: Vec<u64> = indexes.iter().map(|m| m.id).collect();
 
             for id in &index_ids {
-                if let Err(e) = self
-                    .index_mgr
-                    .delete(*id, &old_values, &columns_clone, row_id)
+                if let Err(e) =
+                    self.index_mgr
+                        .delete(tx_id, *id, &old_values, &columns_clone, row_id)
                 {
                     return Err(StorageError::Other(format!("Index delete failed: {}", e)));
                 }
@@ -374,7 +384,10 @@ impl StorageEngine {
             .map_err(|e| StorageError::Other(e.to_string()))?;
 
         for id in index_ids {
-            if let Err(e) = self.index_mgr.insert(id, &values, &columns_clone, row_id) {
+            if let Err(e) = self
+                .index_mgr
+                .insert(tx_id, id, &values, &columns_clone, row_id)
+            {
                 return Err(StorageError::Other(format!("Index insert failed: {}", e)));
             }
         }
@@ -416,9 +429,9 @@ impl StorageEngine {
             let index_ids: Vec<u64> = indexes.iter().map(|m| m.id).collect();
 
             for id in &index_ids {
-                if let Err(e) = self
-                    .index_mgr
-                    .delete(*id, &old_values, &columns_clone, row_id)
+                if let Err(e) =
+                    self.index_mgr
+                        .delete(tx_id, *id, &old_values, &columns_clone, row_id)
                 {
                     return Err(StorageError::Other(format!("Index delete failed: {}", e)));
                 }
@@ -474,7 +487,10 @@ impl StorageEngine {
 
         let (old_values, columns_clone, index_ids) = index_data;
         for id in index_ids {
-            if let Err(e) = self.index_mgr.insert(id, &values, &columns_clone, row_id) {
+            if let Err(e) = self
+                .index_mgr
+                .insert(tx_id, id, &values, &columns_clone, row_id)
+            {
                 return Err(StorageError::Other(format!("Index insert failed: {}", e)));
             }
         }
@@ -484,6 +500,8 @@ impl StorageEngine {
 
     /// Delete a row (without transaction)
     pub fn delete(&mut self, table: &str, row_id: RowId) -> StorageResult<()> {
+        let tx_id = self.lock_mgr.begin();
+
         let old_values: Vec<Value> = {
             let mut heap_table = self
                 .tables
@@ -521,7 +539,10 @@ impl StorageEngine {
         };
 
         for id in index_ids {
-            if let Err(e) = self.index_mgr.delete(id, &old_values, &columns, row_id) {
+            if let Err(e) = self
+                .index_mgr
+                .delete(tx_id, id, &old_values, &columns, row_id)
+            {
                 return Err(StorageError::Other(format!("Index delete failed: {}", e)));
             }
         }
@@ -565,9 +586,9 @@ impl StorageEngine {
             let index_ids: Vec<u64> = indexes.iter().map(|m| m.id).collect();
 
             for id in &index_ids {
-                if let Err(e) = self
-                    .index_mgr
-                    .delete(*id, &old_values, &columns_clone, row_id)
+                if let Err(e) =
+                    self.index_mgr
+                        .delete(tx_id, *id, &old_values, &columns_clone, row_id)
                 {
                     return Err(StorageError::Other(format!("Index delete failed: {}", e)));
                 }
@@ -629,6 +650,9 @@ impl StorageEngine {
             wal.commit(tx_id)
                 .map_err(|e| StorageError::Other(e.to_string()))?;
         }
+
+        self.index_mgr.release_tx_locks(tx_id);
+
         self.lock_mgr.commit(tx_id).map_err(|e| match e {
             crate::lock::LockError::Timeout => StorageError::LockTimeout,
             crate::lock::LockError::Deadlock => StorageError::Deadlock,
@@ -642,6 +666,9 @@ impl StorageEngine {
             wal.abort(tx_id)
                 .map_err(|e| StorageError::Other(e.to_string()))?;
         }
+
+        self.index_mgr.release_tx_locks(tx_id);
+
         self.lock_mgr.abort(tx_id).map_err(|e| match e {
             crate::lock::LockError::Timeout => StorageError::LockTimeout,
             crate::lock::LockError::Deadlock => StorageError::Deadlock,
@@ -692,8 +719,10 @@ impl StorageEngine {
 
     /// Lookup by index
     pub fn lookup_index(&self, index_id: u64, values: &[Value]) -> StorageResult<Vec<RowId>> {
+        let tx_id = self.lock_mgr.begin();
+
         self.index_mgr
-            .lookup(index_id, values, &[])
+            .lookup(tx_id, index_id, values, &[])
             .map_err(|e| StorageError::Other(e.to_string()))
     }
 
