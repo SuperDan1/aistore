@@ -3,6 +3,7 @@
 //! Provides transaction management and locking for ACID compliance.
 
 mod deadlock;
+mod page_lock;
 mod row_lock;
 mod table_lock;
 mod transaction;
@@ -11,6 +12,7 @@ mod transaction;
 mod tests;
 
 pub(crate) use deadlock::DeadlockDetector;
+pub(crate) use page_lock::PageLockManager;
 pub(crate) use row_lock::{RowId as LockRowId, RowLockManager};
 pub(crate) use table_lock::TableLockManager;
 pub(crate) use transaction::{LockError, LockMode, LockResult, TransactionId, TransactionManager};
@@ -26,6 +28,7 @@ pub(crate) struct LockManager {
     tx_manager: TransactionManager,
     row_locks: RowLockManager,
     table_locks: TableLockManager,
+    page_locks: PageLockManager,
     deadlock_detector: DeadlockDetector,
 }
 
@@ -35,6 +38,7 @@ impl LockManager {
             tx_manager: TransactionManager::new(),
             row_locks: RowLockManager::new(),
             table_locks: TableLockManager::new(),
+            page_locks: PageLockManager::new(),
             deadlock_detector: DeadlockDetector::new(),
         }
     }
@@ -46,12 +50,14 @@ impl LockManager {
     pub fn commit(&self, tx_id: TransactionId) -> Result<(), LockError> {
         self.row_locks.release_all(tx_id);
         self.table_locks.release_all(tx_id);
+        self.page_locks.release_all(tx_id);
         self.tx_manager.commit(tx_id)
     }
 
     pub fn abort(&self, tx_id: TransactionId) -> Result<(), LockError> {
         self.row_locks.release_all(tx_id);
         self.table_locks.release_all(tx_id);
+        self.page_locks.release_all(tx_id);
         self.tx_manager.abort(tx_id)
     }
 
@@ -83,6 +89,20 @@ impl LockManager {
 
     pub fn unlock_table(&self, tx_id: TransactionId, table: &str) {
         self.table_locks.unlock(tx_id, table);
+    }
+
+    pub fn lock_page(
+        &self,
+        tx_id: TransactionId,
+        index_id: u64,
+        page_id: u64,
+        mode: LockMode,
+    ) -> LockResult<()> {
+        self.page_locks.lock(tx_id, index_id, page_id, mode)
+    }
+
+    pub fn unlock_page(&self, tx_id: TransactionId, index_id: u64, page_id: u64) {
+        self.page_locks.unlock(tx_id, index_id, page_id);
     }
 
     pub fn set_timeout(&self, _duration: Duration) {}
