@@ -1,15 +1,19 @@
+mod allocator;
 pub(crate) mod btree;
 mod key;
 mod meta;
 
 use crate::buffer::BufferMgr;
 use crate::heap::{RowId, Value};
+use crate::lock::{LockManager, LockMode};
 use crate::table::Column;
+use crate::types::PageId;
 use crate::vfs::VfsInterface;
+use allocator::IndexPageAllocator;
 use btree::{create_root_page, BTreeIndex, IndexError, IndexResult};
 use meta::IndexMeta;
 use parking_lot::RwLock;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -18,23 +22,37 @@ const INDEX_FILE_VERSION: u32 = 1;
 
 pub struct IndexManager {
     buffer_mgr: Arc<RwLock<BufferMgr>>,
+    lock_mgr: Arc<LockManager>,
     vfs: Arc<dyn VfsInterface>,
     data_dir: PathBuf,
     indexes: HashMap<u64, IndexMeta>,
     btrees: HashMap<u64, BTreeIndex>,
     next_index_id: u64,
+    tx_page_locks: HashMap<crate::lock::TransactionId, HashSet<(u64, PageId)>>,
+    page_allocator: IndexPageAllocator,
 }
 
 impl IndexManager {
-    pub fn new(buffer_mgr: Arc<RwLock<BufferMgr>>, data_dir: PathBuf) -> Self {
+    pub fn new(
+        buffer_mgr: Arc<RwLock<BufferMgr>>,
+        lock_mgr: Arc<LockManager>,
+        data_dir: PathBuf,
+    ) -> Self {
         let vfs: Arc<dyn VfsInterface> = Arc::new(crate::vfs::LocalFs::new());
+        let mut page_allocator = IndexPageAllocator::new(Arc::clone(&vfs), data_dir.clone());
+        if let Err(e) = page_allocator.load() {
+            eprintln!("Warning: failed to load index page allocator: {}", e);
+        }
         Self {
             buffer_mgr,
+            lock_mgr,
             vfs,
             data_dir,
             indexes: HashMap::new(),
             btrees: HashMap::new(),
             next_index_id: 1,
+            tx_page_locks: HashMap::new(),
+            page_allocator,
         }
     }
 
@@ -173,8 +191,11 @@ impl IndexManager {
 
             self.btrees.insert(
                 id,
-                BTreeIndex::new(root_page_id, Arc::clone(&self.buffer_mgr), 0.8, 1024),
+                BTreeIndex::new(root_page_id, Arc::clone(&self.buffer_mgr), 0.8, 1024, id),
             );
+            if let Some(btree) = self.btrees.get_mut(&id) {
+                btree.set_next_page_id(root_page_id + 1);
+            }
         }
 
         Ok(())
@@ -213,6 +234,10 @@ impl IndexManager {
                 .map_err(|e| IndexError::Other(e.to_string()))?;
         }
 
+        self.page_allocator
+            .save()
+            .map_err(|e| IndexError::Other(e.to_string()))?;
+
         Ok(())
     }
 
@@ -226,30 +251,40 @@ impl IndexManager {
         let index_id = self.next_index_id;
         self.next_index_id += 1;
 
-        let root_page_id = create_root_page(&self.buffer_mgr, true)?;
+        let root_page_id = self.page_allocator.allocate();
 
         let meta = IndexMeta::new(index_id, name, table_id, columns, is_unique)
             .with_root_page_id(root_page_id);
 
         self.indexes.insert(index_id, meta.clone());
 
-        let btree = BTreeIndex::new(
+        let mut btree = BTreeIndex::new(
             root_page_id,
             Arc::clone(&self.buffer_mgr),
             meta.fill_factor,
             meta.max_key_size,
+            index_id,
         );
+        btree.set_next_page_id(root_page_id + 1);
         self.btrees.insert(index_id, btree);
 
         Ok(index_id)
     }
 
+    pub fn allocate_page(&mut self) -> PageId {
+        self.page_allocator.allocate()
+    }
+
     pub fn drop_index(&mut self, index_id: u64) -> IndexResult<()> {
-        self.indexes
-            .remove(&index_id)
-            .ok_or(IndexError::KeyNotFound)?;
-        self.btrees.remove(&index_id);
-        Ok(())
+        if let Some(meta) = self.indexes.remove(&index_id) {
+            if let Some(btree) = self.btrees.remove(&index_id) {
+                for page_id in btree.allocated_pages() {
+                    self.page_allocator.deallocate(*page_id);
+                }
+            }
+            return Ok(());
+        }
+        Err(IndexError::KeyNotFound)
     }
 
     pub fn get_index(&self, index_id: u64) -> Option<&IndexMeta> {
@@ -269,6 +304,7 @@ impl IndexManager {
 
     pub fn insert(
         &mut self,
+        tx_id: crate::lock::TransactionId,
         index_id: u64,
         values: &[Value],
         columns: &[Column],
@@ -277,6 +313,21 @@ impl IndexManager {
         let meta = self.indexes.get(&index_id).ok_or(IndexError::KeyNotFound)?;
 
         let key = build_key(values, columns, &meta.columns)?;
+
+        let root_page_id = meta.root_page_id;
+        self.lock_mgr
+            .lock_page(
+                tx_id,
+                index_id,
+                root_page_id,
+                crate::lock::LockMode::Exclusive,
+            )
+            .map_err(|e| IndexError::Other(e.to_string()))?;
+
+        self.tx_page_locks
+            .entry(tx_id)
+            .or_insert_with(HashSet::new)
+            .insert((index_id, root_page_id));
 
         let btree = self
             .btrees
@@ -288,6 +339,7 @@ impl IndexManager {
 
     pub fn delete(
         &mut self,
+        tx_id: crate::lock::TransactionId,
         index_id: u64,
         values: &[Value],
         columns: &[Column],
@@ -296,6 +348,21 @@ impl IndexManager {
         let meta = self.indexes.get(&index_id).ok_or(IndexError::KeyNotFound)?;
 
         let key = build_key(values, columns, &meta.columns)?;
+
+        let root_page_id = meta.root_page_id;
+        self.lock_mgr
+            .lock_page(
+                tx_id,
+                index_id,
+                root_page_id,
+                crate::lock::LockMode::Exclusive,
+            )
+            .map_err(|e| IndexError::Other(e.to_string()))?;
+
+        self.tx_page_locks
+            .entry(tx_id)
+            .or_insert_with(HashSet::new)
+            .insert((index_id, root_page_id));
 
         let btree = self
             .btrees
@@ -307,6 +374,7 @@ impl IndexManager {
 
     pub fn lookup(
         &self,
+        tx_id: crate::lock::TransactionId,
         index_id: u64,
         values: &[Value],
         columns: &[Column],
@@ -315,11 +383,24 @@ impl IndexManager {
 
         let key = build_key(values, columns, &meta.columns)?;
 
+        let root_page_id = meta.root_page_id;
+        self.lock_mgr
+            .lock_page(tx_id, index_id, root_page_id, crate::lock::LockMode::Shared)
+            .map_err(|e| IndexError::Other(e.to_string()))?;
+
         let btree = self.btrees.get(&index_id).ok_or(IndexError::KeyNotFound)?;
 
         match btree.search(&key)? {
             Some((page_id, slot_idx)) => Ok(vec![RowId::new(page_id, slot_idx)]),
             None => Ok(vec![]),
+        }
+    }
+
+    pub fn release_tx_locks(&mut self, tx_id: crate::lock::TransactionId) {
+        if let Some(locks) = self.tx_page_locks.remove(&tx_id) {
+            for (index_id, page_id) in locks {
+                self.lock_mgr.unlock_page(tx_id, index_id, page_id);
+            }
         }
     }
 
@@ -375,7 +456,8 @@ mod tests {
             PathBuf::from("./test_data"),
         )));
 
-        let mut mgr = IndexManager::new(buffer_mgr, PathBuf::from("./test_data"));
+        let lock_mgr = Arc::new(crate::lock::LockManager::new());
+        let mut mgr = IndexManager::new(buffer_mgr, lock_mgr, PathBuf::from("./test_data"));
         let index_id = mgr
             .create_index(1, "idx_id".to_string(), vec!["id".to_string()], true)
             .unwrap();
