@@ -1,5 +1,7 @@
 //! Aistore storage engine library
 
+pub use logger::init as init_log;
+
 // Re-export storage engine API only
 pub use heap::{HeapError, RowId, Tuple, Value};
 pub use storage::{Filter, StorageEngine, StorageError, StorageResult, TableId};
@@ -12,6 +14,7 @@ pub(crate) mod heap;
 pub(crate) mod index;
 pub(crate) mod infrastructure;
 pub(crate) mod lock;
+pub(crate) mod logger;
 pub(crate) mod mvcc;
 pub(crate) mod page;
 pub(crate) mod segment;

@@ -12,6 +12,7 @@ mod heap;
 mod index;
 mod infrastructure;
 mod lock;
+mod logger;
 mod mvcc;
 mod page;
 mod segment;
@@ -27,11 +28,14 @@ mod wal;
 use heap::{RowId, Value};
 use storage::StorageEngine;
 use table::Column;
+use tracing::{error, info, warn};
 use types::ColumnType;
 
 fn main() {
-    println!("Aistore Storage Engine Demo\n");
-    println!("============================\n");
+    logger::init(None, "info,aistore=debug");
+
+    info!("Aistore Storage Engine Demo");
+    info!("==============================");
 
     // Create storage engine
     let mut engine = StorageEngine::new("./data").expect("Failed to create storage engine");
@@ -46,10 +50,10 @@ fn main() {
     let table_id = engine
         .create_table("users", columns)
         .expect("Failed to create table");
-    println!("Created table 'users' with id: {}", table_id);
+    info!("Created table 'users' with id: {}", table_id);
 
     // Insert rows
-    println!("\n--- Inserting rows ---");
+    info!("Inserting rows");
 
     let row1 = vec![
         Value::Int64(1),
@@ -57,7 +61,7 @@ fn main() {
         Value::Int32(30),
     ];
     let id1 = engine.insert("users", row1).expect("Failed to insert");
-    println!(
+    info!(
         "Inserted row 1: page_id={}, slot_idx={}",
         id1.page_id, id1.slot_idx
     );
@@ -68,7 +72,7 @@ fn main() {
         Value::Int32(25),
     ];
     let id2 = engine.insert("users", row2).expect("Failed to insert");
-    println!(
+    info!(
         "Inserted row 2: page_id={}, slot_idx={}",
         id2.page_id, id2.slot_idx
     );
@@ -79,22 +83,22 @@ fn main() {
         Value::Int32(35),
     ];
     let id3 = engine.insert("users", row3).expect("Failed to insert");
-    println!(
+    info!(
         "Inserted row 3: page_id={}, slot_idx={}",
         id3.page_id, id3.slot_idx
     );
 
     // Scan all rows
-    println!("\n--- Scanning all rows ---");
+    info!("Scanning all rows");
     let rows = engine.scan("users", None).expect("Failed to scan");
-    println!("Found {} rows:", rows.len());
+    info!("Found {} rows:", rows.len());
     for row in &rows {
         let vals: Vec<String> = row.values().iter().map(|v| format!("{:?}", v)).collect();
-        println!("  {:?}", vals);
+        info!("  {:?}", vals);
     }
 
     // Update a row
-    println!("\n--- Updating row 1 ---");
+    info!("Updating row 1");
     let new_row1 = vec![
         Value::Int64(1),
         Value::VarChar("Alice Smith".into()),
@@ -103,29 +107,29 @@ fn main() {
     engine
         .update("users", id1, new_row1)
         .expect("Failed to update");
-    println!("Updated row 1");
+    info!("Updated row 1");
 
     // Scan again
-    println!("\n--- Scanning after update ---");
+    info!("Scanning after update");
     let rows = engine.scan("users", None).expect("Failed to scan");
     for row in &rows {
         let vals: Vec<String> = row.values().iter().map(|v| format!("{:?}", v)).collect();
-        println!("  {:?}", vals);
+        info!("  {:?}", vals);
     }
 
     // Delete a row
-    println!("\n--- Deleting row 2 ---");
+    info!("Deleting row 2");
     engine.delete("users", id2).expect("Failed to delete");
-    println!("Deleted row 2");
+    info!("Deleted row 2");
 
     // Final scan
-    println!("\n--- Final scan ---");
+    info!("Final scan");
     let rows = engine.scan("users", None).expect("Failed to scan");
-    println!("{} rows remaining:", rows.len());
+    info!("{} rows remaining:", rows.len());
     for row in &rows {
         let vals: Vec<String> = row.values().iter().map(|v| format!("{:?}", v)).collect();
-        println!("  {:?}", vals);
+        info!("  {:?}", vals);
     }
 
-    println!("\n=== Demo Complete ===");
+    info!("Demo Complete");
 }

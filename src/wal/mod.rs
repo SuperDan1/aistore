@@ -29,6 +29,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use tracing::error;
 
 /// WAL error
 #[derive(Debug)]
@@ -126,7 +127,7 @@ impl WalManager {
         let lsn = match self.buffer.append(tx_id, data, None) {
             Ok(lsn) => lsn,
             Err(e) => {
-                eprintln!("WAL: Failed to append record: {}", e);
+                error!(error = %e, "Failed to append WAL record");
                 return LSN::invalid();
             }
         };
