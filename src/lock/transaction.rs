@@ -1,6 +1,6 @@
 //! Transaction management
 
-use crate::types::{PageId, LSN};
+use crate::types::{LSN, PageId};
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};

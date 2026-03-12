@@ -9,6 +9,9 @@ use std::sync::Arc;
 const CHECKPOINT_MAGIC: u32 = 0x434B5054; // "CKPT"
 const CHECKPOINT_VERSION: u32 = 0x00000001;
 
+/// Transaction info page ID (special system page)
+pub const TRX_INFO_PAGE_ID: PageId = 0;
+
 /// Checkpoint record
 #[derive(Debug, Clone)]
 pub struct CheckpointRecord {
@@ -17,6 +20,7 @@ pub struct CheckpointRecord {
     pub end_lsn: LSN,
     pub dirty_pages: Vec<PageId>,
     pub active_transactions: Vec<u64>,
+    pub trx_info_page_id: PageId,
 }
 
 #[derive(Clone)]
@@ -37,12 +41,12 @@ impl CheckpointManager {
         }
     }
 
-    /// Create a checkpoint
     pub fn checkpoint(
         &mut self,
         begin_lsn: LSN,
         dirty_pages: Vec<PageId>,
         active_transactions: Vec<u64>,
+        trx_info_page_id: PageId,
     ) -> VfsResult<CheckpointRecord> {
         self.checkpoint_id += 1;
 
@@ -52,6 +56,7 @@ impl CheckpointManager {
             end_lsn: LSN::invalid(),
             dirty_pages,
             active_transactions,
+            trx_info_page_id,
         };
 
         self.write_checkpoint(&record)?;
@@ -60,7 +65,6 @@ impl CheckpointManager {
         Ok(record)
     }
 
-    /// Write checkpoint to disk
     fn write_checkpoint(&self, record: &CheckpointRecord) -> VfsResult<()> {
         self.vfs.create_dir(self.checkpoint_dir.to_str().unwrap())?;
 
@@ -85,12 +89,13 @@ impl CheckpointManager {
             data.extend_from_slice(&tx_id.to_le_bytes());
         }
 
+        data.extend_from_slice(&record.trx_info_page_id.to_le_bytes());
+
         self.vfs.pwrite(path.to_str().unwrap(), &data, 0)?;
 
         Ok(())
     }
 
-    /// Load latest checkpoint
     pub fn load_latest(&self) -> Option<CheckpointRecord> {
         let path = self.checkpoint_dir.join("checkpoint.bin");
 
@@ -100,7 +105,7 @@ impl CheckpointManager {
             Err(_) => return None,
         };
 
-        if n < 24 {
+        if n < 32 {
             return None;
         }
 
@@ -163,16 +168,27 @@ impl CheckpointManager {
             offset += 8;
         }
 
+        let trx_info_page_id = u64::from_le_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+            data[offset + 4],
+            data[offset + 5],
+            data[offset + 6],
+            data[offset + 7],
+        ]);
+
         Some(CheckpointRecord {
             checkpoint_id,
             begin_lsn,
             end_lsn: LSN::invalid(),
             dirty_pages,
             active_transactions,
+            trx_info_page_id,
         })
     }
 
-    /// Get last checkpoint LSN
     pub fn last_checkpoint_lsn(&self) -> LSN {
         self.last_checkpoint_lsn
     }

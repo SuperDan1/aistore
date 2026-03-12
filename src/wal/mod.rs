@@ -245,13 +245,16 @@ impl WalManager {
     }
 
     /// Perform checkpoint with provided dirty pages
-    pub fn checkpoint(&self, dirty_pages: Vec<PageId>) -> WalResult<LSN> {
-        let active_transactions: Vec<u64> = self.tx_lsns.read().keys().cloned().collect();
-
+    pub fn checkpoint(
+        &self,
+        dirty_pages: Vec<PageId>,
+        active_transactions: Vec<u64>,
+        trx_info_page_id: PageId,
+    ) -> WalResult<LSN> {
         let lsn = self.file_mgr.current_lsn();
 
         let mut mgr = self.checkpoint_mgr.write();
-        mgr.checkpoint(lsn, dirty_pages, active_transactions)
+        mgr.checkpoint(lsn, dirty_pages, active_transactions, trx_info_page_id)
             .map_err(|e| WalError::IoError(e.to_string()))?;
 
         let _ = self.file_mgr.cleanup_old_logs(lsn);
@@ -259,15 +262,18 @@ impl WalManager {
         Ok(lsn)
     }
 
-    /// Recover from crash
-    pub fn recover(&self) -> RecoveryResult {
+    /// Recover from crash with page writer callback
+    pub fn recover<F>(&self, write_page: F) -> RecoveryResult
+    where
+        F: Fn(PageId, &[u8]) -> Result<(), String> + Send + Sync + 'static,
+    {
         if let Some(ref mgr) = *self.recovery_mgr.read() {
-            mgr.recover(|_, _| Ok(()))
+            mgr.recover(write_page)
         } else {
             RecoveryResult {
                 checkpoint_lsn: LSN::invalid(),
                 replayed_records: 0,
-                rolled_back_transactions: Vec::new(),
+                trx_info_page_id: 0,
             }
         }
     }
@@ -280,9 +286,11 @@ impl WalManager {
         }
 
         let buffer = Arc::clone(&self.buffer);
-        thread::spawn(move || loop {
-            thread::sleep(Duration::from_secs(interval));
-            let _ = buffer.flush();
+        thread::spawn(move || {
+            loop {
+                thread::sleep(Duration::from_secs(interval));
+                let _ = buffer.flush();
+            }
         });
     }
 

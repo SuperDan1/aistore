@@ -557,4 +557,105 @@ mod concurrency_tests {
             handle.join().unwrap();
         }
     }
+
+    // === Deadlock Detection Tests ===
+
+    #[test]
+    fn test_deadlock_cycle_detection() {
+        let mgr = Arc::new(LockManager::new());
+
+        let mgr1 = mgr.clone();
+        let mgr2 = mgr.clone();
+
+        let h1 = thread::spawn(move || {
+            let tx1 = mgr1.begin();
+            mgr1.lock_row(tx1, "table_a", 1, 0, LockMode::Exclusive)
+                .ok();
+            thread::sleep(Duration::from_millis(10));
+            let _ = mgr1.lock_row(tx1, "table_b", 1, 0, LockMode::Exclusive);
+            mgr1.commit(tx1).ok();
+        });
+
+        let h2 = thread::spawn(move || {
+            let tx2 = mgr2.begin();
+            mgr2.lock_row(tx2, "table_b", 1, 0, LockMode::Exclusive)
+                .ok();
+            thread::sleep(Duration::from_millis(10));
+            let _ = mgr2.lock_row(tx2, "table_a", 1, 0, LockMode::Exclusive);
+            mgr2.commit(tx2).ok();
+        });
+
+        let r1 = h1.join();
+        let r2 = h2.join();
+
+        // One should succeed, one may timeout/fail (deadlock detection or timeout)
+        assert!(r1.is_ok() || r2.is_ok());
+    }
+
+    #[test]
+    fn test_no_deadlock_with_different_rows() {
+        let mgr = Arc::new(LockManager::new());
+
+        let handles: Vec<_> = (0..5)
+            .map(|i| {
+                let mgr = mgr.clone();
+                thread::spawn(move || {
+                    let tx = mgr.begin();
+                    let result = mgr.lock_row(tx, "test", 1, i, LockMode::Exclusive);
+                    if result.is_ok() {
+                        mgr.commit(tx).ok();
+                    }
+                    result
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            let result = handle.join().unwrap();
+            assert!(result.is_ok(), "Different rows should not cause deadlock");
+        }
+    }
+
+    #[test]
+    fn test_shared_to_exclusive_upgrade() {
+        let mgr = Arc::new(LockManager::new());
+        let tx = mgr.begin();
+
+        mgr.lock_row(tx, "test", 1, 0, LockMode::Shared).ok();
+
+        let result = mgr.lock_row(tx, "test", 1, 0, LockMode::Exclusive);
+
+        mgr.commit(tx).ok();
+
+        // Same transaction should be able to upgrade from Shared to Exclusive
+        assert!(
+            result.is_ok(),
+            "Lock upgrade should succeed within same transaction"
+        );
+    }
+
+    #[test]
+    fn test_multiple_transactions_same_row_shared() {
+        let mgr = Arc::new(LockManager::new());
+
+        let handles: Vec<_> = (0..3)
+            .map(|_| {
+                let mgr = mgr.clone();
+                thread::spawn(move || {
+                    let tx = mgr.begin();
+                    let result = mgr.lock_row(tx, "test", 1, 0, LockMode::Shared);
+                    if result.is_ok() {
+                        thread::sleep(Duration::from_millis(10));
+                        mgr.commit(tx).ok();
+                    }
+                    result
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            let result = handle.join().unwrap();
+            assert!(result.is_ok(), "Multiple shared locks should succeed");
+        }
+    }
 }

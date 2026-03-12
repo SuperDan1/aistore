@@ -10,7 +10,7 @@ use crate::table::Column;
 use crate::types::PageId;
 use crate::vfs::VfsInterface;
 use allocator::IndexPageAllocator;
-use btree::{create_root_page, BTreeIndex, IndexError, IndexResult};
+use btree::{BTreeIndex, IndexError, IndexResult, create_root_page};
 use meta::IndexMeta;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};

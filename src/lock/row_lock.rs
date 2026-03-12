@@ -64,9 +64,9 @@ impl RowLockEntry {
         // Check compatibility
         for holder in &self.holders {
             if holder.tx_id == tx_id {
-                // Same transaction - upgrade S to X if needed
+                // Same transaction - upgrade S to X is allowed
                 if mode == LockMode::Exclusive && holder.mode == LockMode::Shared {
-                    return false; // Need to wait for upgrade
+                    return true; // Allow upgrade for same transaction
                 }
                 continue;
             }
@@ -79,8 +79,13 @@ impl RowLockEntry {
 
     /// Add a holder
     fn add_holder(&mut self, tx_id: TransactionId, mode: LockMode) {
-        // Check if already holder
-        if !self.holders.iter().any(|h| h.tx_id == tx_id) {
+        // Check if already holder - update mode if upgrading
+        if let Some(holder) = self.holders.iter_mut().find(|h| h.tx_id == tx_id) {
+            // Upgrade mode if needed (S -> X)
+            if mode == LockMode::Exclusive && holder.mode == LockMode::Shared {
+                holder.mode = mode;
+            }
+        } else {
             self.holders.push(LockHolder { tx_id, mode });
         }
     }

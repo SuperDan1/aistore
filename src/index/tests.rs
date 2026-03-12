@@ -2,6 +2,7 @@
 
 use crate::heap::Value;
 use crate::index::key::{compare_int64, deserialize_int64, serialize_int64, serialize_value};
+use std::f64::consts::PI;
 
 mod key_tests {
     use super::*;
@@ -101,7 +102,7 @@ mod value_serialization_tests {
 
     #[test]
     fn test_serialize_value_float() {
-        let value = Value::Float64(3.14);
+        let value = Value::Float64(PI);
         let bytes = serialize_value(&value);
         assert!(bytes.is_some());
     }

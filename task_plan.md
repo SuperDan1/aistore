@@ -22,7 +22,7 @@
 ### Phase 2: 设计集成方案 🔄
 - [x] 设计 BufferMgr 恢复接口
 - [x] 设计 StorageEngine 启动恢复流程
-- [ ] 设计事务回滚逻辑
+- [x] 设计事务回滚逻辑
 
 ---
 
@@ -144,18 +144,19 @@ impl WalManager {
 | P2 | 添加单元测试 | src/wal/recovery.rs |
 
 ### Phase 3: 实施
-- [ ] 为 BufferMgr 添加恢复页面接口
-- [ ] 修复 WalManager.recover 回调
-- [ ] 在 StorageEngine 启动时调用 recover
-- [ ] 实现未提交事务回滚
+- [x] 为 BufferMgr 添加恢复页面接口
+- [x] 修复 WalManager.recover 回调
+- [x] 在 StorageEngine 启动时调用 recover
+- [x] 实现未提交事务回滚 (占位)
 
 ### Phase 4: 测试
 - [ ] 单元测试：恢复流程
 - [ ] 集成测试：崩溃恢复场景
 
 ## 当前状态
-- **Phase**: 1 (研究中)
+- **Phase**: 3 (实施完成)
 - **开始时间**: 2026-03-07
+- **完成时间**: 2026-03-12
 
 ## 关键文件
 - `src/storage.rs` - StorageEngine

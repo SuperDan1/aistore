@@ -11,7 +11,7 @@ mod syscache;
 mod table;
 
 pub(crate) use builder::TableBuilder;
-pub(crate) use column::Column;
+pub use column::Column;
 pub(crate) use table::Table;
 pub(crate) use table::TableType;
 

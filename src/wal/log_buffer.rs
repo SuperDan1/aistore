@@ -5,9 +5,9 @@ use crate::wal::config::WalConfig;
 use crate::wal::log_file::LogFileManager;
 use crate::wal::lsn::LSN;
 use parking_lot::Mutex;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 

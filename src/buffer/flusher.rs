@@ -2,9 +2,10 @@
 
 use crate::buffer::BufferMgr;
 use crate::wal::WalManager;
+use crate::wal::checkpoint::TRX_INFO_PAGE_ID;
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 pub struct PageFlusher {
@@ -93,7 +94,7 @@ impl PageFlusher {
         );
 
         if let Some(ref wal) = self.wal {
-            let _ = wal.checkpoint(dirty_pages);
+            let _ = wal.checkpoint(dirty_pages, Vec::<u64>::new(), TRX_INFO_PAGE_ID);
         }
     }
 

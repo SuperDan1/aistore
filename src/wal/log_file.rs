@@ -11,14 +11,14 @@ const WAL_MAGIC: u32 = 0x57414C31;
 const WAL_VERSION: u32 = 0x00000001;
 
 pub struct LogFile {
-    file_id: u16,
+    file_id: u32,
     path: PathBuf,
     size: u64,
     vfs: Arc<dyn VfsInterface>,
 }
 
 impl LogFile {
-    pub fn create(vfs: Arc<dyn VfsInterface>, dir: &PathBuf, file_id: u16) -> VfsResult<Self> {
+    pub fn create(vfs: Arc<dyn VfsInterface>, dir: &PathBuf, file_id: u32) -> VfsResult<Self> {
         let path = dir.join(format!("{:016x}.wal", file_id));
 
         vfs.create_dir(dir.to_str().unwrap())?;
@@ -88,7 +88,7 @@ impl LogFile {
         Ok(buf)
     }
 
-    pub fn file_id(&self) -> u16 {
+    pub fn file_id(&self) -> u32 {
         self.file_id
     }
 
@@ -109,8 +109,7 @@ pub struct LogFileManager {
     config: WalConfig,
     vfs: Arc<dyn VfsInterface>,
     files: RwLock<Vec<LogFile>>,
-    current_file_id: RwLock<u16>,
-    current_offset: RwLock<u64>,
+    current_lsn: RwLock<u64>,
 }
 
 impl LogFileManager {
@@ -119,8 +118,7 @@ impl LogFileManager {
             config,
             vfs,
             files: RwLock::new(Vec::new()),
-            current_file_id: RwLock::new(0),
-            current_offset: RwLock::new(16),
+            current_lsn: RwLock::new(16),
         };
 
         manager.init()?;
@@ -131,49 +129,49 @@ impl LogFileManager {
     fn init(&mut self) -> VfsResult<()> {
         let file = LogFile::create(Arc::clone(&self.vfs), &self.config.log_dir, 0)?;
 
-        *self.current_file_id.write() = 0;
-        *self.current_offset.write() = file.size();
+        *self.current_lsn.write() = file.size();
         self.files.write().push(file);
 
         Ok(())
     }
 
     pub fn append(&self, data: &[u8]) -> VfsResult<LSN> {
-        let file_id = *self.current_file_id.read();
-        let offset = *self.current_offset.read();
+        let current_lsn = *self.current_lsn.read();
+        let file_size = self.config.max_file_size;
 
-        if offset + data.len() as u64 > self.config.max_file_size {
+        if current_lsn + data.len() as u64 > file_size {
             return self.rotate_and_append(data);
         }
 
         let mut files = self.files.write();
-        if let Some(file) = files.get_mut(file_id as usize) {
-            file.append(data, offset)?;
+        if let Some(file) = files.last_mut() {
+            file.append(data, current_lsn)?;
         }
 
-        let lsn = LSN::new(file_id, offset);
-        *self.current_offset.write() = offset + data.len() as u64;
+        let lsn = LSN::new(current_lsn);
+        *self.current_lsn.write() = current_lsn + data.len() as u64;
 
         Ok(lsn)
     }
 
     fn rotate_and_append(&self, data: &[u8]) -> VfsResult<LSN> {
-        let new_file_id = *self.current_file_id.read() + 1;
+        let new_file_id = {
+            let files = self.files.read();
+            files.len() as u32
+        };
 
         let file = LogFile::create(Arc::clone(&self.vfs), &self.config.log_dir, new_file_id)?;
 
-        *self.current_file_id.write() = new_file_id;
-        *self.current_offset.write() = 16;
-
-        let lsn = LSN::new(new_file_id, 16);
+        *self.current_lsn.write() = 0;
         let mut files = self.files.write();
         files.push(file);
 
         if let Some(file) = files.last_mut() {
-            file.append(data, 16)?;
+            file.append(data, 0)?;
         }
 
-        *self.current_offset.write() = 16 + data.len() as u64;
+        let lsn = LSN::new(0);
+        *self.current_lsn.write() = data.len() as u64;
 
         Ok(lsn)
     }
@@ -187,7 +185,7 @@ impl LogFileManager {
     }
 
     pub fn current_lsn(&self) -> LSN {
-        LSN::new(*self.current_file_id.read(), *self.current_offset.read())
+        LSN::new(*self.current_lsn.read())
     }
 
     pub fn flushed_lsn(&self) -> LSN {
@@ -196,31 +194,29 @@ impl LogFileManager {
 
     pub fn read_from(&self, lsn: LSN) -> VfsResult<Vec<u8>> {
         let files = self.files.read();
+        let file_id = (lsn.raw() / self.config.max_file_size) as usize;
 
-        if let Some(file) = files.get(lsn.file_id() as usize) {
-            file.read(lsn.offset(), 1024 * 1024)
+        if let Some(file) = files.get(file_id) {
+            let offset = lsn.raw() % self.config.max_file_size;
+            file.read(offset, 1024 * 1024)
         } else {
-            Err(VfsError::NotFound("Log file not found".to_string()))
+            Err(VfsError::NotFound(format!("file {} not found", file_id)))
         }
-    }
-
-    pub fn list_files(&self) -> Vec<PathBuf> {
-        let files = self.files.read();
-        files.iter().map(|f| f.path().clone()).collect()
     }
 
     /// Clean up old log files before checkpoint_lsn
     pub fn cleanup_old_logs(&self, checkpoint_lsn: LSN) -> VfsResult<usize> {
         let mut cleaned = 0;
-        let checkpoint_file_id = checkpoint_lsn.file_id();
-        let current_file_id = *self.current_file_id.read();
+        let checkpoint_file = checkpoint_lsn.raw() / self.config.max_file_size;
+        let current_lsn = *self.current_lsn.read();
+        let current_file = current_lsn / self.config.max_file_size;
 
         let mut files = self.files.write();
         let mut to_remove = Vec::new();
 
-        for (idx, file) in files.iter().enumerate() {
-            let file_id = file.file_id();
-            if file_id < checkpoint_file_id && file_id < current_file_id {
+        for idx in 0..files.len() {
+            let file_start = (idx as u64) * self.config.max_file_size;
+            if file_start < checkpoint_lsn.raw() && file_start < current_lsn {
                 to_remove.push(idx);
             }
         }

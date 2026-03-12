@@ -4,7 +4,7 @@
 use crate::buffer::BufferMgr;
 use crate::page::Page;
 use crate::table::{Column, Table};
-use crate::types::{PageId, RowMVCCHeader, TransactionId, UndoPtr, PAGE_SIZE};
+use crate::types::{PAGE_SIZE, PageId, RowMVCCHeader, TransactionId, UndoPtr};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;

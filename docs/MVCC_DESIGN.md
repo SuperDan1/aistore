@@ -1003,7 +1003,7 @@ impl Transaction {
         
         Ok(ReadSnapshot {
             tx_id: self.tx_id,
-            snapshot_lsn: 0, // TODO: 获取当前 LSN
+            snapshot_lsn: 0, // TODO: 获取当前 LSN (需要从 WAL 获取)
             max_committed_tx: max_committed,
             active_txns: active,
             isolation: IsolationLevel::ReadCommitted,

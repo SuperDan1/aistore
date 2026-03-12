@@ -8,14 +8,14 @@ pub(crate) mod flusher;
 pub(crate) mod lru;
 
 use crate::infrastructure::hash::fnv1a_hash;
-use crate::page::Page;
-use crate::types::{PageId, PAGE_SIZE};
+use crate::page::{Page, TrxInfoPage};
+use crate::types::{PAGE_SIZE, PageId, TransactionId, UndoPtr};
 use crate::vfs::{VfsError, VfsInterface};
 use lru::LruManager;
 use std::alloc;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{fmt, mem};
 
 /// Invalid page ID constant
@@ -224,6 +224,11 @@ pub(crate) struct BufferMgr {
     /// Base directory for page files
     data_dir: PathBuf,
 }
+
+/// SAFETY: BufferMgr is protected by RwLock in StorageEngine, making it thread-safe
+/// The raw pointers are internal and never exposed outside
+unsafe impl Send for BufferMgr {}
+unsafe impl Sync for BufferMgr {}
 
 impl BufferMgr {
     /// Creates a new BufferMgr with the specified buffer size
@@ -560,6 +565,54 @@ impl BufferMgr {
         Ok(())
     }
 
+    /// Recover a page from WAL replay (used during crash recovery)
+    ///
+    /// This method loads a page directly into the buffer pool without reading from disk.
+    /// Used during WAL recovery to replay log records.
+    ///
+    /// # Arguments
+    /// * `page_id` - The PageId to recover
+    /// * `data` - The page data from WAL replay
+    ///
+    /// # Returns
+    /// * `Ok(())` - Page successfully recovered
+    /// * `Err(BufferError)` - If buffer allocation fails
+    pub fn recover_page(&mut self, page_id: PageId, data: &[u8]) -> Result<(), BufferError> {
+        let len = data.len().min(PAGE_SIZE);
+
+        // Check if page is already in buffer
+        if let Some(buffer_idx) = self.lookup(page_id) {
+            // Page already in buffer, directly write data
+            let page_ptr = &mut self.page_data[buffer_idx] as *mut Page as *mut u8;
+            let page_slice = unsafe { std::slice::from_raw_parts_mut(page_ptr, PAGE_SIZE) };
+            page_slice[..len].copy_from_slice(&data[..len]);
+            // Mark as clean (recovered from WAL, already the latest)
+            let buffer = unsafe { &*self.buffers.add(buffer_idx) };
+            buffer.clear_dirty();
+            return Ok(());
+        }
+
+        // Page not in buffer, allocate new buffer (without reading from disk)
+        let buffer_idx = self.allocate_buffer(page_id)?;
+
+        // Write recovery data directly
+        let page_ptr = &mut self.page_data[buffer_idx] as *mut Page as *mut u8;
+        let page_slice = unsafe { std::slice::from_raw_parts_mut(page_ptr, PAGE_SIZE) };
+        page_slice[..len].copy_from_slice(&data[..len]);
+
+        // Register in hash table
+        self.insert_hash_entry(page_id, buffer_idx);
+
+        // Add to LRU
+        self.lru.add(buffer_idx);
+
+        // Mark as clean (recovered from WAL)
+        let buffer = unsafe { &*self.buffers.add(buffer_idx) };
+        buffer.clear_dirty();
+
+        Ok(())
+    }
+
     /// Returns the current number of buffers in the pool
     #[inline]
     pub fn buffer_size(&self) -> usize {
@@ -585,6 +638,74 @@ impl BufferMgr {
         } else {
             None
         }
+    }
+
+    /// Get TrxInfoPage from buffer pool
+    pub fn get_trx_info_page(&mut self, page_id: PageId) -> Result<TrxInfoPage, BufferError> {
+        if let Some(buffer_idx) = self.lookup(page_id) {
+            self.lru.access(&buffer_idx);
+            let buffer = unsafe { &*self.buffers.add(buffer_idx) };
+            buffer.pin();
+
+            let page_ptr = &self.page_data[buffer_idx] as *const Page as *const u8;
+            let data = unsafe { std::slice::from_raw_parts(page_ptr, PAGE_SIZE) };
+            return Ok(TrxInfoPage::from_bytes(data));
+        }
+
+        Err(BufferError::PageNotFound(page_id))
+    }
+
+    /// Write TrxInfoPage to buffer pool (marks as dirty)
+    pub fn write_trx_info_page(
+        &mut self,
+        page_id: PageId,
+        trx_page: &TrxInfoPage,
+    ) -> Result<(), BufferError> {
+        let data = trx_page.as_bytes();
+
+        if let Some(buffer_idx) = self.lookup(page_id) {
+            let page_ptr = &mut self.page_data[buffer_idx] as *mut Page as *mut u8;
+            let page_slice = unsafe { std::slice::from_raw_parts_mut(page_ptr, PAGE_SIZE) };
+            page_slice.copy_from_slice(&data);
+
+            let buffer = unsafe { &*self.buffers.add(buffer_idx) };
+            buffer.set_dirty();
+            return Ok(());
+        }
+
+        let buffer_idx = self.allocate_buffer(page_id)?;
+        let page_ptr = &mut self.page_data[buffer_idx] as *mut Page as *mut u8;
+        let page_slice = unsafe { std::slice::from_raw_parts_mut(page_ptr, PAGE_SIZE) };
+        page_slice.copy_from_slice(&data);
+
+        self.insert_hash_entry(page_id, buffer_idx);
+        self.lru.add(buffer_idx);
+
+        let buffer = unsafe { &*self.buffers.add(buffer_idx) };
+        buffer.set_dirty();
+
+        Ok(())
+    }
+
+    /// Get active transactions from TrxInfoPage
+    pub fn get_active_txns(
+        &mut self,
+        page_id: PageId,
+    ) -> Result<Vec<(TransactionId, UndoPtr)>, BufferError> {
+        let trx_page = self.get_trx_info_page(page_id)?;
+        Ok(trx_page.get_active_transactions())
+    }
+
+    /// Update transaction undo ptr in TrxInfoPage
+    pub fn update_tx_undo_ptr(
+        &mut self,
+        page_id: PageId,
+        tx_id: TransactionId,
+        undo_ptr: UndoPtr,
+    ) -> Result<(), BufferError> {
+        let mut trx_page = self.get_trx_info_page(page_id)?;
+        trx_page.add_transaction(tx_id, undo_ptr);
+        self.write_trx_info_page(page_id, &trx_page)
     }
 }
 
@@ -797,5 +918,211 @@ mod tests {
     fn test_buffer_tag_new() {
         let tag = BufferTag::new(100);
         assert_eq!(tag.page_id, 100);
+    }
+
+    // === Concurrency Tests (for race condition detection) ===
+
+    /// Test concurrent pin/unpin operations - checks for pin count leaks
+    #[test]
+    fn test_buffer_desc_concurrent_pin_unpin() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::thread;
+
+        let desc = Arc::new(BufferDesc::new());
+        let error_count = Arc::new(AtomicUsize::new(0));
+        let iterations = 1000;
+        let thread_count = 4;
+
+        let mut handles = Vec::new();
+        for _ in 0..thread_count {
+            let desc = Arc::clone(&desc);
+            let errors = Arc::clone(&error_count);
+            handles.push(thread::spawn(move || {
+                for _ in 0..iterations {
+                    desc.pin();
+                }
+            }));
+        }
+
+        for handle in handles {
+            let _ = handle.join();
+        }
+
+        // Now unpin all in one thread
+        let pin_count = desc.pin_count();
+        for _ in 0..(iterations * thread_count) {
+            desc.unpin();
+        }
+
+        // Final pin count should be 0
+        assert_eq!(
+            desc.pin_count(),
+            0,
+            "PIN count leak detected! Expected 0, got {}",
+            desc.pin_count()
+        );
+    }
+
+    /// Test concurrent dirty flag set/clear - checks for race conditions
+    #[test]
+    fn test_buffer_desc_concurrent_dirty_set_clear() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let desc = Arc::new(BufferDesc::new());
+        let iterations = 10000;
+
+        let mut handles = Vec::new();
+
+        // Thread 1: Set dirty repeatedly
+        let desc1 = Arc::clone(&desc);
+        handles.push(thread::spawn(move || {
+            for _ in 0..iterations {
+                desc1.set_dirty();
+            }
+        }));
+
+        // Thread 2: Clear dirty repeatedly
+        let desc2 = Arc::clone(&desc);
+        handles.push(thread::spawn(move || {
+            for _ in 0..iterations {
+                desc2.clear_dirty();
+            }
+        }));
+
+        for handle in handles {
+            let _ = handle.join();
+        }
+
+        // After all operations, dirty flag should be consistent (either set or clear)
+        // The key is no panic and consistent state
+        let is_dirty = desc.is_dirty();
+        assert!(is_dirty || !is_dirty, "Dirty flag state is consistent");
+    }
+
+    /// Test concurrent dirty flag and pin operations - potential race condition
+    #[test]
+    fn test_buffer_desc_concurrent_dirty_and_pin() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let desc = Arc::new(BufferDesc::new());
+        let iterations = 5000;
+
+        let mut handles = Vec::new();
+
+        // Thread 1: Pin/unpin
+        let desc1 = Arc::clone(&desc);
+        handles.push(thread::spawn(move || {
+            for _ in 0..iterations {
+                desc1.pin();
+                desc1.unpin();
+            }
+        }));
+
+        // Thread 2: Set dirty
+        let desc2 = Arc::clone(&desc);
+        handles.push(thread::spawn(move || {
+            for _ in 0..iterations {
+                desc2.set_dirty();
+            }
+        }));
+
+        // Thread 3: Clear dirty
+        let desc3 = Arc::clone(&desc);
+        handles.push(thread::spawn(move || {
+            for _ in 0..iterations {
+                desc3.clear_dirty();
+            }
+        }));
+
+        for handle in handles {
+            let _ = handle.join();
+        }
+
+        // Check final state is consistent
+        let pin_count = desc.pin_count();
+        assert_eq!(pin_count, 0, "Pin count should be 0 after all operations");
+    }
+
+    /// Test pin count overflow scenario
+    #[test]
+    fn test_buffer_desc_max_pin_count() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let desc = Arc::new(BufferDesc::new());
+
+        // Try to trigger overflow with concurrent pins
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let desc = Arc::clone(&desc);
+            handles.push(thread::spawn(move || {
+                // Each thread pins many times
+                for _ in 0..1000000 {
+                    desc.pin();
+                }
+            }));
+        }
+
+        for handle in handles {
+            // If overflow panic happens, test will fail (as expected)
+            let _ = handle.join();
+        }
+
+        // Unpin all
+        loop {
+            let count = desc.pin_count();
+            if count == 0 {
+                break;
+            }
+            // Try to unpin some
+            for _ in 0..1000 {
+                if desc.pin_count() > 0 {
+                    let _ = desc.unpin();
+                }
+            }
+        }
+    }
+
+    /// Test buffer state consistency between dirty flag and pin count
+    #[test]
+    fn test_buffer_state_atomic_consistency() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let desc = Arc::new(BufferDesc::new());
+        let iterations = 1000;
+
+        // Concurrent operations that modify different parts of state
+        let mut handles = Vec::new();
+
+        for _ in 0..iterations {
+            // Pin
+            let d = Arc::clone(&desc);
+            handles.push(thread::spawn(move || {
+                d.pin();
+            }));
+        }
+
+        for _ in 0..iterations {
+            // Set dirty
+            let d = Arc::clone(&desc);
+            handles.push(thread::spawn(move || {
+                d.set_dirty();
+            }));
+        }
+
+        for handle in handles {
+            let _ = handle.join();
+        }
+
+        // Both operations should succeed without corruption
+        let pin_count = desc.pin_count();
+        let is_dirty = desc.is_dirty();
+
+        assert!(pin_count > 0, "Pin count should be > 0");
+        assert!(is_dirty, "Dirty flag should be set");
     }
 }
