@@ -9,7 +9,7 @@ use crate::heap::{HeapTable, RowId, Tuple, Value};
 use crate::index::IndexManager;
 use crate::lock::{LockManager, LockMode, TransactionId};
 use crate::table::Column;
-use crate::types::{UndoPtr, UndoRecord, UndoType};
+use crate::types::UndoPtr;
 use crate::wal::WalManager;
 use std::collections::HashMap;
 use std::sync::Arc;

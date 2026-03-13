@@ -5,12 +5,12 @@ mod meta;
 
 use crate::buffer::BufferMgr;
 use crate::heap::{RowId, Value};
-use crate::lock::{LockManager, LockMode};
+use crate::lock::LockManager;
 use crate::table::Column;
 use crate::types::PageId;
 use crate::vfs::VfsInterface;
 use allocator::IndexPageAllocator;
-use btree::{create_root_page, BTreeIndex, IndexError, IndexResult};
+use btree::{BTreeIndex, IndexError, IndexResult};
 use meta::IndexMeta;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
