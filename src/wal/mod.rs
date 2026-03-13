@@ -24,11 +24,11 @@ use recovery::{RecoveryManager, RecoveryResult};
 use crate::lock::TransactionId;
 use crate::types::PageId;
 use crate::vfs::VfsInterface;
-use parking_lot::RwLock;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use tracing::error;
 
 /// WAL error
@@ -118,7 +118,7 @@ impl WalManager {
 
         let prev_lsn = self
             .tx_lsns
-            .read()
+            .blocking_read()
             .get(&tx_id)
             .map(|t| t.prev_lsn)
             .unwrap_or(LSN::invalid());
@@ -132,7 +132,7 @@ impl WalManager {
             }
         };
 
-        self.tx_lsns.write().insert(
+        self.tx_lsns.blocking_write().insert(
             tx_id,
             TxLsn {
                 prev_lsn,
@@ -155,7 +155,7 @@ impl WalManager {
             return Ok(LSN::invalid());
         }
 
-        let tx_lsn = self.tx_lsns.write().remove(&tx_id);
+        let tx_lsn = self.tx_lsns.blocking_write().remove(&tx_id);
         let (prev_lsn, commit_lsn) = tx_lsn
             .as_ref()
             .map(|t| (t.prev_lsn, t.commit_lsn))
@@ -175,7 +175,7 @@ impl WalManager {
             return Ok(());
         }
 
-        let tx_lsn = self.tx_lsns.write().remove(&tx_id);
+        let tx_lsn = self.tx_lsns.blocking_write().remove(&tx_id);
         let prev_lsn = tx_lsn
             .as_ref()
             .map(|t| t.prev_lsn)
@@ -203,7 +203,7 @@ impl WalManager {
 
         let prev_lsn = self
             .tx_lsns
-            .read()
+            .blocking_read()
             .get(&tx_id)
             .map(|t| t.prev_lsn)
             .unwrap_or(LSN::invalid());
@@ -253,7 +253,7 @@ impl WalManager {
     ) -> WalResult<LSN> {
         let lsn = self.file_mgr.current_lsn();
 
-        let mut mgr = self.checkpoint_mgr.write();
+        let mut mgr = self.checkpoint_mgr.blocking_write();
         mgr.checkpoint(lsn, dirty_pages, active_transactions, trx_info_page_id)
             .map_err(|e| WalError::IoError(e.to_string()))?;
 
@@ -267,7 +267,7 @@ impl WalManager {
     where
         F: Fn(PageId, &[u8]) -> Result<(), String> + Send + Sync + 'static,
     {
-        if let Some(ref mgr) = *self.recovery_mgr.read() {
+        if let Some(ref mgr) = *self.recovery_mgr.blocking_read() {
             mgr.recover(write_page)
         } else {
             RecoveryResult {
@@ -286,11 +286,9 @@ impl WalManager {
         }
 
         let buffer = Arc::clone(&self.buffer);
-        thread::spawn(move || {
-            loop {
-                thread::sleep(Duration::from_secs(interval));
-                let _ = buffer.flush();
-            }
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(interval));
+            let _ = buffer.flush();
         });
     }
 

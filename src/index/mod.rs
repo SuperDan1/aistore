@@ -10,12 +10,12 @@ use crate::table::Column;
 use crate::types::PageId;
 use crate::vfs::VfsInterface;
 use allocator::IndexPageAllocator;
-use btree::{BTreeIndex, IndexError, IndexResult, create_root_page};
+use btree::{create_root_page, BTreeIndex, IndexError, IndexResult};
 use meta::IndexMeta;
-use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 const INDEX_FILE_MAGIC: u32 = 0x494e4458;
 const INDEX_FILE_VERSION: u32 = 1;

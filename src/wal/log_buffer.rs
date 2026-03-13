@@ -4,12 +4,12 @@ use crate::lock::TransactionId;
 use crate::wal::config::WalConfig;
 use crate::wal::log_file::LogFileManager;
 use crate::wal::lsn::LSN;
-use parking_lot::Mutex;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
+use tokio::sync::Mutex;
 
 /// Pending record waiting for flush
 pub struct PendingRecord {
@@ -66,7 +66,7 @@ impl LogBuffer {
             waiter,
         };
 
-        self.pending.lock().push(record);
+        self.pending.blocking_lock().push(record);
         self.batch_count.fetch_add(1, Ordering::Relaxed);
 
         // Trigger flush if batch threshold reached
@@ -79,7 +79,7 @@ impl LogBuffer {
 
     /// Trigger flush from any thread
     fn trigger_flush(&self) {
-        if let Some(tx) = self.flush_tx.lock().as_ref() {
+        if let Some(tx) = self.flush_tx.blocking_lock().as_ref() {
             let _ = tx.send(());
         }
     }
@@ -87,13 +87,13 @@ impl LogBuffer {
     /// Flush loop - runs in background
     fn flush_loop(&self) {
         let (flush_tx, flush_rx) = mpsc::channel();
-        *self.flush_tx.lock() = Some(flush_tx);
+        *self.flush_tx.blocking_lock() = Some(flush_tx);
 
         while self.running.load(Ordering::Relaxed) {
             // Check if we should flush based on batch count OR timeout
             let should_flush = {
                 let count = self.batch_count.load(Ordering::Relaxed);
-                let elapsed = self.last_flush_time.lock().elapsed().as_millis() as u64;
+                let elapsed = self.last_flush_time.blocking_lock().elapsed().as_millis() as u64;
                 count >= self.config.group_commit_batch
                     || elapsed >= self.config.group_commit_timeout_ms
             };
@@ -127,7 +127,7 @@ impl LogBuffer {
     /// Force flush all pending records
     pub fn flush(&self) -> Result<(), String> {
         let records = {
-            let mut pending = self.pending.lock();
+            let mut pending = self.pending.blocking_lock();
             if pending.is_empty() {
                 return Ok(());
             }
@@ -136,7 +136,7 @@ impl LogBuffer {
 
         self.file_mgr.flush().map_err(|e| e.to_string())?;
         self.batch_count.store(0, Ordering::Relaxed);
-        *self.last_flush_time.lock() = Instant::now();
+        *self.last_flush_time.blocking_lock() = Instant::now();
 
         for record in records {
             if let Some(sender) = record.waiter {

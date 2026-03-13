@@ -1,8 +1,8 @@
 use crate::buffer::BufferMgr;
 use crate::page::Page;
 use crate::types::PageId;
-use parking_lot::RwLock;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 const BTREE_MAX_KEY_SIZE: usize = 128;
 
@@ -429,7 +429,7 @@ impl BTreeIndex {
 
     /// Load a page from BufferPool
     fn load_page(&self, page_id: PageId) -> IndexResult<Option<BTreePage>> {
-        let buf = self.buffer_mgr.read();
+        let buf = self.buffer_mgr.blocking_read();
         if let Some(page) = buf.get_page_data(page_id) {
             let btree_page = BTreePage::deserialize(page);
             Ok(Some(btree_page))
@@ -440,7 +440,7 @@ impl BTreeIndex {
 
     /// Save a page to BufferPool and mark dirty
     fn save_page(&mut self, btree_page: &BTreePage) -> IndexResult<()> {
-        let mut buf = self.buffer_mgr.write();
+        let mut buf = self.buffer_mgr.blocking_write();
         match buf.get_page(btree_page.page_id) {
             Ok(page) => {
                 btree_page.serialize(page);
@@ -630,7 +630,7 @@ impl BTreeIndex {
 
     /// Save root page ID to a special metadata page (page_id = 0)
     fn save_root_pointer(&self) -> IndexResult<()> {
-        let mut buf = self.buffer_mgr.write();
+        let mut buf = self.buffer_mgr.blocking_write();
         match buf.get_page(0) {
             Ok(page) => {
                 // Page 0: store root_page_id at offset 0
@@ -646,7 +646,7 @@ impl BTreeIndex {
     }
 
     pub fn load_root_pointer(buffer_mgr: &Arc<RwLock<BufferMgr>>) -> IndexResult<PageId> {
-        let buf = buffer_mgr.read();
+        let buf = buffer_mgr.blocking_read();
         if let Some(page) = buf.get_page_data(0) {
             let data = unsafe {
                 std::slice::from_raw_parts(page as *const crate::page::Page as *const u8, 8192)
@@ -698,7 +698,7 @@ impl BTreeIndex {
 
 pub fn create_root_page(buffer_mgr: &Arc<RwLock<BufferMgr>>, is_leaf: bool) -> IndexResult<PageId> {
     let page_id = {
-        let buf = buffer_mgr.write();
+        let buf = buffer_mgr.blocking_write();
         // Allocate a new page (next available)
         // For now, just return a new ID
         1

@@ -4,10 +4,10 @@
 use crate::buffer::BufferMgr;
 use crate::page::Page;
 use crate::table::{Column, Table};
-use crate::types::{PAGE_SIZE, PageId, RowMVCCHeader, TransactionId, UndoPtr};
-use parking_lot::RwLock;
+use crate::types::{PageId, RowMVCCHeader, TransactionId, UndoPtr, PAGE_SIZE};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 type HeapResult<T> = Result<T, HeapError>;
 
@@ -409,7 +409,7 @@ impl HeapTable {
             return Ok(p.clone());
         }
         // Try to load from buffer pool
-        let mut buf = self.buffer_mgr.write();
+        let mut buf = self.buffer_mgr.blocking_write();
         if let Ok(page) = buf.get_page(page_id) {
             let page_data = unsafe {
                 std::slice::from_raw_parts(
@@ -428,7 +428,7 @@ impl HeapTable {
         self.pages.insert(page_id, heap_page.clone());
 
         // Also write to buffer pool if page exists there
-        let mut buf = self.buffer_mgr.write();
+        let mut buf = self.buffer_mgr.blocking_write();
         if let Ok(page) = buf.get_page(page_id) {
             let page_data = unsafe {
                 std::slice::from_raw_parts_mut(
@@ -446,7 +446,7 @@ impl HeapTable {
     }
 
     pub fn flush(&mut self) -> HeapResult<()> {
-        let mut buf = self.buffer_mgr.write();
+        let mut buf = self.buffer_mgr.blocking_write();
         for (page_id, heap_page) in self.pages.iter() {
             if let Ok(page) = buf.get_page(*page_id) {
                 let page_data = unsafe {

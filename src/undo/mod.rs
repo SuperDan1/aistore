@@ -6,7 +6,7 @@ mod segment;
 pub(crate) use error::{UndoError, UndoResult};
 pub(crate) use segment::UndoSegment;
 
-use crate::types::{LSN, PageId, TransactionId, UndoPtr, UndoRecord, UndoRecordHeader, UndoType};
+use crate::types::{PageId, TransactionId, UndoPtr, UndoRecord, UndoRecordHeader, UndoType, LSN};
 use std::path::PathBuf;
 use std::sync::RwLock;
 

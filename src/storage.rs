@@ -2,8 +2,8 @@
 //!
 //! Provides a simple table-oriented storage API for benchmarks and applications.
 
-use crate::buffer::BufferMgr;
 use crate::buffer::flusher::PageFlusher;
+use crate::buffer::BufferMgr;
 use crate::catalog::Catalog;
 use crate::heap::{HeapTable, RowId, Tuple, Value};
 use crate::index::IndexManager;
@@ -11,9 +11,9 @@ use crate::lock::{LockManager, LockMode, TransactionId};
 use crate::table::Column;
 use crate::types::{UndoPtr, UndoRecord, UndoType};
 use crate::wal::WalManager;
-use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Table ID type
 pub type TableId = u64;
@@ -106,7 +106,7 @@ impl StorageEngine {
         if let Some(ref wal) = wal {
             let buffer_mgr_for_recovery = Arc::clone(&buffer_mgr);
             let result = wal.recover(move |page_id: crate::types::PageId, data: &[u8]| {
-                let mut buf = buffer_mgr_for_recovery.write();
+                let mut buf = buffer_mgr_for_recovery.blocking_write();
                 buf.recover_page(page_id, data).map_err(|e| e.to_string())
             });
             trx_info_page_id = result.trx_info_page_id;
@@ -138,7 +138,7 @@ impl StorageEngine {
         if trx_info_page_id != 0 {
             let active_txns = storage
                 .buffer_mgr
-                .write()
+                .blocking_write()
                 .get_active_txns(trx_info_page_id)
                 .unwrap_or_default();
 
@@ -182,7 +182,7 @@ impl StorageEngine {
             affected_pages.push(record.header.row_page_id);
         }
 
-        let mut buffer_mgr = self.buffer_mgr.write();
+        let mut buffer_mgr = self.buffer_mgr.blocking_write();
         for page_id in affected_pages {
             buffer_mgr.mark_dirty(page_id);
         }

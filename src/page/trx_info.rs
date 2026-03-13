@@ -1,6 +1,6 @@
 //! Transaction Info Page - stores active transaction state for recovery
 
-use crate::types::{PAGE_SIZE, PageId, TransactionId, UndoPtr};
+use crate::types::{PageId, TransactionId, UndoPtr, PAGE_SIZE};
 
 /// Maximum number of transactions we can track
 const MAX_TX_ENTRIES: usize = 1024;

@@ -1,12 +1,12 @@
 use crate::catalog::error::{CatalogError, CatalogResult};
 use crate::table::{Column, Table, TableBuilder, TableType};
 use crate::types::SegmentId;
-use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 mod error;
 
@@ -74,7 +74,7 @@ impl Catalog {
         segment_id: SegmentId,
         columns: Vec<Column>,
     ) -> CatalogResult<Arc<Table>> {
-        if self.name_cache.read().contains_key(table_name) {
+        if self.name_cache.blocking_read().contains_key(table_name) {
             return Err(CatalogError::TableAlreadyExists(table_name.to_string()));
         }
 
@@ -104,7 +104,7 @@ impl Catalog {
 
     pub fn get_table(&self, table_name: &str) -> CatalogResult<Arc<Table>> {
         self.name_cache
-            .read()
+            .blocking_read()
             .get(table_name)
             .map(|entry| entry.table.clone())
             .ok_or_else(|| CatalogError::TableNotFound(table_name.to_string()))
@@ -112,7 +112,7 @@ impl Catalog {
 
     pub fn get_table_by_id(&self, table_id: u64) -> CatalogResult<Arc<Table>> {
         let name = {
-            let id_cache = self.id_cache.read();
+            let id_cache = self.id_cache.blocking_read();
             id_cache
                 .get(&table_id)
                 .ok_or_else(|| CatalogError::TableNotFound(format!("ID: {}", table_id)))?
@@ -124,7 +124,7 @@ impl Catalog {
 
     pub fn list_tables(&self) -> Vec<Arc<Table>> {
         self.name_cache
-            .read()
+            .blocking_read()
             .values()
             .map(|entry| entry.table.clone())
             .collect()
@@ -132,12 +132,12 @@ impl Catalog {
 
     pub fn drop_table(&self, table_name: &str) -> CatalogResult<()> {
         let _table_id = {
-            let mut name_cache = self.name_cache.write();
+            let mut name_cache = self.name_cache.blocking_write();
             let entry = name_cache
                 .remove(table_name)
                 .ok_or_else(|| CatalogError::TableNotFound(table_name.to_string()))?;
 
-            let mut id_cache = self.id_cache.write();
+            let mut id_cache = self.id_cache.blocking_write();
             id_cache.remove(&entry.table.table_id);
 
             entry.table.table_id
@@ -152,15 +152,15 @@ impl Catalog {
     }
 
     pub fn table_exists(&self, table_name: &str) -> bool {
-        self.name_cache.read().contains_key(table_name)
+        self.name_cache.blocking_read().contains_key(table_name)
     }
 
     pub fn peek_next_table_id(&self) -> u64 {
-        *self.next_table_id.read()
+        *self.next_table_id.blocking_read()
     }
 
     fn allocate_table_id(&self) -> u64 {
-        let mut next_id = self.next_table_id.write();
+        let mut next_id = self.next_table_id.blocking_write();
         let id = *next_id;
         *next_id += 1;
         id
@@ -171,8 +171,8 @@ impl Catalog {
             table: table.clone(),
         };
 
-        let mut name_cache = self.name_cache.write();
-        let mut id_cache = self.id_cache.write();
+        let mut name_cache = self.name_cache.blocking_write();
+        let mut id_cache = self.id_cache.blocking_write();
 
         if name_cache.contains_key(table.table_name()) {
             return Err(CatalogError::TableAlreadyExists(
@@ -183,7 +183,7 @@ impl Catalog {
         name_cache.insert(table.table_name().to_string(), entry);
         id_cache.insert(table.table_id, table.table_name().to_string());
 
-        let mut next_id = self.next_table_id.write();
+        let mut next_id = self.next_table_id.blocking_write();
         if table.table_id >= *next_id {
             *next_id = table.table_id + 1;
         }

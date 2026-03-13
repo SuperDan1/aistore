@@ -1,9 +1,9 @@
 //! Table-level locking
 
 use super::{LockError, LockMode, LockResult, TransactionId};
-use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 
 /// Table lock entry
 #[derive(Debug, Clone)]
@@ -91,7 +91,7 @@ impl TableLockManager {
             }
 
             let entry = {
-                let locks = self.locks.read();
+                let locks = self.locks.blocking_read();
                 locks.get(table_name).cloned()
             };
 
@@ -99,12 +99,14 @@ impl TableLockManager {
                 Some(mut entry) => {
                     if entry.can_grant(tx_id, mode) {
                         entry.add_holder(tx_id, mode);
-                        self.locks.write().insert(table_name.to_string(), entry);
+                        self.locks
+                            .blocking_write()
+                            .insert(table_name.to_string(), entry);
                         return Ok(());
                     }
 
                     drop(entry);
-                    let mut locks = self.locks.write();
+                    let mut locks = self.locks.blocking_write();
                     let entry = locks
                         .entry(table_name.to_string())
                         .or_insert_with(TableLockEntry::new);
@@ -123,7 +125,9 @@ impl TableLockManager {
                 None => {
                     let mut entry = TableLockEntry::new();
                     entry.add_holder(tx_id, mode);
-                    self.locks.write().insert(table_name.to_string(), entry);
+                    self.locks
+                        .blocking_write()
+                        .insert(table_name.to_string(), entry);
                     return Ok(());
                 }
             }
@@ -134,7 +138,7 @@ impl TableLockManager {
 
     /// Release a table lock
     pub fn unlock(&self, tx_id: TransactionId, table_name: &str) {
-        let mut locks = self.locks.write();
+        let mut locks = self.locks.blocking_write();
         if let Some(entry) = locks.get_mut(table_name) {
             entry.remove_holder(tx_id);
 
@@ -155,7 +159,7 @@ impl TableLockManager {
     /// Release all locks for a transaction
     pub fn release_all(&self, tx_id: TransactionId) {
         let tables: Vec<String> = {
-            let locks = self.locks.read();
+            let locks = self.locks.blocking_read();
             locks
                 .iter()
                 .filter(|(_, entry)| entry.holders.iter().any(|h| h.tx_id == tx_id))

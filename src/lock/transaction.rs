@@ -1,10 +1,10 @@
 //! Transaction management
 
-use crate::types::{LSN, PageId};
-use parking_lot::RwLock;
+use crate::types::{PageId, LSN};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 
 /// Transaction ID type
 pub type TransactionId = u64;
@@ -122,13 +122,13 @@ impl TransactionManager {
     pub fn begin(&self) -> TransactionId {
         let tx_id = self.next_tx_id.fetch_add(1, Ordering::SeqCst);
         let tx = Transaction::new(tx_id);
-        self.active_txns.write().insert(tx_id);
-        self.transactions.write().insert(tx_id, tx);
+        self.active_txns.blocking_write().insert(tx_id);
+        self.transactions.blocking_write().insert(tx_id, tx);
         tx_id
     }
 
     pub fn get(&self, tx_id: TransactionId) -> Option<Transaction> {
-        self.transactions.read().get(&tx_id).cloned()
+        self.transactions.blocking_read().get(&tx_id).cloned()
     }
 
     pub fn get_mut(
@@ -136,13 +136,13 @@ impl TransactionManager {
         tx_id: TransactionId,
     ) -> Option<parking_lot::RwLockWriteGuard<Transaction>> {
         self.transactions
-            .write()
+            .blocking_write()
             .get_mut(&tx_id)
             .map(|_| unreachable!())
     }
 
     pub fn commit(&self, tx_id: TransactionId) -> Result<(), LockError> {
-        let mut txns = self.transactions.write();
+        let mut txns = self.transactions.blocking_write();
         if let Some(tx) = txns.get_mut(&tx_id) {
             if tx.status != TxStatus::Active {
                 return Err(LockError::TransactionNotActive);
@@ -153,7 +153,7 @@ impl TransactionManager {
             return Err(LockError::TransactionNotFound);
         }
 
-        self.active_txns.write().remove(&tx_id);
+        self.active_txns.blocking_write().remove(&tx_id);
 
         let mut current_max = self.max_committed_tx.load(Ordering::SeqCst);
         while tx_id > current_max {
@@ -171,7 +171,7 @@ impl TransactionManager {
     }
 
     pub fn abort(&self, tx_id: TransactionId) -> Result<(), LockError> {
-        let mut txns = self.transactions.write();
+        let mut txns = self.transactions.blocking_write();
         if let Some(tx) = txns.get_mut(&tx_id) {
             if tx.status != TxStatus::Active {
                 return Err(LockError::TransactionNotActive);
@@ -182,7 +182,7 @@ impl TransactionManager {
             return Err(LockError::TransactionNotFound);
         }
 
-        self.active_txns.write().remove(&tx_id);
+        self.active_txns.blocking_write().remove(&tx_id);
 
         Ok(())
     }
@@ -194,7 +194,7 @@ impl TransactionManager {
     }
 
     pub fn get_active_txns(&self) -> Vec<TransactionId> {
-        self.active_txns.read().iter().copied().collect()
+        self.active_txns.blocking_read().iter().copied().collect()
     }
 
     pub fn get_max_committed_tx(&self) -> TransactionId {
@@ -202,24 +202,24 @@ impl TransactionManager {
     }
 
     pub fn is_active(&self, tx_id: TransactionId) -> bool {
-        self.active_txns.read().contains(&tx_id)
+        self.active_txns.blocking_read().contains(&tx_id)
     }
 
     pub fn set_start_lsn(&self, tx_id: TransactionId, lsn: LSN) {
-        if let Some(tx) = self.transactions.write().get_mut(&tx_id) {
+        if let Some(tx) = self.transactions.blocking_write().get_mut(&tx_id) {
             tx.start_lsn = lsn;
         }
     }
 
     pub fn set_last_undo_ptr(&self, tx_id: TransactionId, ptr: crate::types::UndoPtr) {
-        if let Some(tx) = self.transactions.write().get_mut(&tx_id) {
+        if let Some(tx) = self.transactions.blocking_write().get_mut(&tx_id) {
             tx.last_undo_ptr = Some(ptr);
         }
     }
 
     pub fn get_last_undo_ptr(&self, tx_id: TransactionId) -> crate::types::UndoPtr {
         self.transactions
-            .read()
+            .blocking_read()
             .get(&tx_id)
             .and_then(|tx| tx.last_undo_ptr)
             .unwrap_or(crate::types::UndoPtr::null())

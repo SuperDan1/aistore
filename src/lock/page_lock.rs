@@ -2,9 +2,9 @@
 
 use super::{LockError, LockMode, LockResult, TransactionId};
 use crate::types::PageId;
-use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 
 /// Page identifier (index_id + page_id)
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -139,11 +139,11 @@ impl PageLockManager {
             let page_lock_id = PageLockId::new(index_id, page_id);
 
             {
-                let locks = self.locks.read();
+                let locks = self.locks.blocking_read();
                 if let Some(entry) = locks.get(&page_lock_id) {
                     if entry.can_grant(tx_id, mode) {
                         drop(locks);
-                        let mut locks = self.locks.write();
+                        let mut locks = self.locks.blocking_write();
                         let entry = locks.entry(page_lock_id).or_insert_with(PageLockEntry::new);
                         entry.add_holder(tx_id, mode);
                         return Ok(());
@@ -153,7 +153,7 @@ impl PageLockManager {
 
             {
                 let page_lock_id = PageLockId::new(index_id, page_id);
-                let mut locks = self.locks.write();
+                let mut locks = self.locks.blocking_write();
                 let entry = locks.entry(page_lock_id).or_insert_with(PageLockEntry::new);
 
                 if entry.can_grant(tx_id, mode) {
@@ -168,7 +168,7 @@ impl PageLockManager {
 
             if start.elapsed() > self.lock_timeout {
                 let page_lock_id = PageLockId::new(index_id, page_id);
-                let mut locks = self.locks.write();
+                let mut locks = self.locks.blocking_write();
                 if let Some(entry) = locks.get_mut(&page_lock_id) {
                     entry.remove_waiter(tx_id);
                 }
@@ -182,7 +182,7 @@ impl PageLockManager {
     /// Release a lock on a page
     pub fn unlock(&self, tx_id: TransactionId, index_id: u64, page_id: PageId) {
         let page_lock_id = PageLockId::new(index_id, page_id);
-        let mut locks = self.locks.write();
+        let mut locks = self.locks.blocking_write();
 
         if let Some(entry) = locks.get_mut(&page_lock_id) {
             entry.remove_holder(tx_id);
@@ -199,7 +199,7 @@ impl PageLockManager {
 
     /// Release all locks held by a transaction
     pub fn release_all(&self, tx_id: TransactionId) {
-        let mut locks = self.locks.write();
+        let mut locks = self.locks.blocking_write();
         let keys: Vec<_> = locks.keys().cloned().collect();
 
         for key in keys {
@@ -223,13 +223,13 @@ impl PageLockManager {
     /// Check if a page is locked by transaction
     pub fn is_locked(&self, index_id: u64, page_id: PageId) -> bool {
         let page_lock_id = PageLockId::new(index_id, page_id);
-        let locks = self.locks.read();
+        let locks = self.locks.blocking_read();
         locks.contains_key(&page_lock_id)
     }
 
     /// Get lock info for debugging
     pub fn lock_info(&self) -> Vec<(PageLockId, Vec<(TransactionId, LockMode)>)> {
-        let locks = self.locks.read();
+        let locks = self.locks.blocking_read();
         locks
             .iter()
             .map(|(key, entry)| {

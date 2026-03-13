@@ -2,9 +2,9 @@
 
 use super::{LockError, LockMode, LockResult, TransactionId};
 use crate::types::PageId;
-use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 
 /// Row identifier (table + page + slot)
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -129,7 +129,7 @@ impl RowLockManager {
 
             // Get or create lock entry
             let entry = {
-                let locks = self.locks.read();
+                let locks = self.locks.blocking_read();
                 locks.get(&row_id).cloned()
             };
 
@@ -138,13 +138,13 @@ impl RowLockManager {
                     // Check if can grant
                     if entry.can_grant(tx_id, mode) {
                         entry.add_holder(tx_id, mode);
-                        self.locks.write().insert(row_id, entry);
+                        self.locks.blocking_write().insert(row_id, entry);
                         return Ok(());
                     }
 
                     // Add to waiters
                     drop(entry);
-                    let mut locks = self.locks.write();
+                    let mut locks = self.locks.blocking_write();
                     let entry = locks
                         .entry(row_id.clone())
                         .or_insert_with(RowLockEntry::new);
@@ -166,7 +166,7 @@ impl RowLockManager {
                     // No lock exists, create new one
                     let mut entry = RowLockEntry::new();
                     entry.add_holder(tx_id, mode);
-                    self.locks.write().insert(row_id, entry);
+                    self.locks.blocking_write().insert(row_id, entry);
                     return Ok(());
                 }
             }
@@ -178,7 +178,7 @@ impl RowLockManager {
 
     /// Release a row lock
     pub fn unlock(&self, tx_id: TransactionId, row_id: &RowId) {
-        let mut locks = self.locks.write();
+        let mut locks = self.locks.blocking_write();
         if let Some(entry) = locks.get_mut(row_id) {
             entry.remove_holder(tx_id);
 
@@ -201,7 +201,7 @@ impl RowLockManager {
 
     /// Get all locks held by a transaction
     pub fn get_locks(&self, tx_id: TransactionId) -> Vec<RowId> {
-        let locks = self.locks.read();
+        let locks = self.locks.blocking_read();
         locks
             .iter()
             .filter(|(_, entry)| entry.holders.iter().any(|h| h.tx_id == tx_id))
@@ -220,7 +220,7 @@ impl RowLockManager {
     /// Check for deadlock (simple version)
     pub fn check_deadlock(&self, tx_id: TransactionId) -> bool {
         // Simplified: check if tx is waiting for a lock held by another tx that's waiting
-        let locks = self.locks.read();
+        let locks = self.locks.blocking_read();
 
         // Find all transactions this tx is waiting on
         let mut waiting_on: Vec<TransactionId> = Vec::new();

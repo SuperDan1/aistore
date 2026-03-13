@@ -3,9 +3,9 @@
 use crate::vfs::{VfsError, VfsInterface, VfsResult};
 use crate::wal::config::WalConfig;
 use crate::wal::lsn::LSN;
-use parking_lot::RwLock;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 const WAL_MAGIC: u32 = 0x57414C31;
 const WAL_VERSION: u32 = 0x00000001;
@@ -129,41 +129,41 @@ impl LogFileManager {
     fn init(&mut self) -> VfsResult<()> {
         let file = LogFile::create(Arc::clone(&self.vfs), &self.config.log_dir, 0)?;
 
-        *self.current_lsn.write() = file.size();
-        self.files.write().push(file);
+        *self.current_lsn.blocking_write() = file.size();
+        self.files.blocking_write().push(file);
 
         Ok(())
     }
 
     pub fn append(&self, data: &[u8]) -> VfsResult<LSN> {
-        let current_lsn = *self.current_lsn.read();
+        let current_lsn = *self.current_lsn.blocking_read();
         let file_size = self.config.max_file_size;
 
         if current_lsn + data.len() as u64 > file_size {
             return self.rotate_and_append(data);
         }
 
-        let mut files = self.files.write();
+        let mut files = self.files.blocking_write();
         if let Some(file) = files.last_mut() {
             file.append(data, current_lsn)?;
         }
 
         let lsn = LSN::new(current_lsn);
-        *self.current_lsn.write() = current_lsn + data.len() as u64;
+        *self.current_lsn.blocking_write() = current_lsn + data.len() as u64;
 
         Ok(lsn)
     }
 
     fn rotate_and_append(&self, data: &[u8]) -> VfsResult<LSN> {
         let new_file_id = {
-            let files = self.files.read();
+            let files = self.files.blocking_read();
             files.len() as u32
         };
 
         let file = LogFile::create(Arc::clone(&self.vfs), &self.config.log_dir, new_file_id)?;
 
-        *self.current_lsn.write() = 0;
-        let mut files = self.files.write();
+        *self.current_lsn.blocking_write() = 0;
+        let mut files = self.files.blocking_write();
         files.push(file);
 
         if let Some(file) = files.last_mut() {
@@ -171,13 +171,13 @@ impl LogFileManager {
         }
 
         let lsn = LSN::new(0);
-        *self.current_lsn.write() = data.len() as u64;
+        *self.current_lsn.blocking_write() = data.len() as u64;
 
         Ok(lsn)
     }
 
     pub fn flush(&self) -> VfsResult<()> {
-        let files = self.files.read();
+        let files = self.files.blocking_read();
         for file in files.iter() {
             file.sync()?;
         }
@@ -185,7 +185,7 @@ impl LogFileManager {
     }
 
     pub fn current_lsn(&self) -> LSN {
-        LSN::new(*self.current_lsn.read())
+        LSN::new(*self.current_lsn.blocking_read())
     }
 
     pub fn flushed_lsn(&self) -> LSN {
@@ -193,7 +193,7 @@ impl LogFileManager {
     }
 
     pub fn read_from(&self, lsn: LSN) -> VfsResult<Vec<u8>> {
-        let files = self.files.read();
+        let files = self.files.blocking_read();
         let file_id = (lsn.raw() / self.config.max_file_size) as usize;
 
         if let Some(file) = files.get(file_id) {
@@ -208,10 +208,10 @@ impl LogFileManager {
     pub fn cleanup_old_logs(&self, checkpoint_lsn: LSN) -> VfsResult<usize> {
         let mut cleaned = 0;
         let checkpoint_file = checkpoint_lsn.raw() / self.config.max_file_size;
-        let current_lsn = *self.current_lsn.read();
+        let current_lsn = *self.current_lsn.blocking_read();
         let current_file = current_lsn / self.config.max_file_size;
 
-        let mut files = self.files.write();
+        let mut files = self.files.blocking_write();
         let mut to_remove = Vec::new();
 
         for idx in 0..files.len() {

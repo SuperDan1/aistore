@@ -9,13 +9,13 @@ pub(crate) mod lru;
 
 use crate::infrastructure::hash::fnv1a_hash;
 use crate::page::{Page, TrxInfoPage};
-use crate::types::{PAGE_SIZE, PageId, TransactionId, UndoPtr};
+use crate::types::{PageId, TransactionId, UndoPtr, PAGE_SIZE};
 use crate::vfs::{VfsError, VfsInterface};
 use lru::LruManager;
 use std::alloc;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::{fmt, mem};
 
 /// Invalid page ID constant
@@ -925,8 +925,8 @@ mod tests {
     /// Test concurrent pin/unpin operations - checks for pin count leaks
     #[test]
     fn test_buffer_desc_concurrent_pin_unpin() {
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
         use std::thread;
 
         let desc = Arc::new(BufferDesc::new());

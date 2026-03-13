@@ -1,12 +1,12 @@
 //! Background page flusher with checkpoint support
 
 use crate::buffer::BufferMgr;
-use crate::wal::WalManager;
 use crate::wal::checkpoint::TRX_INFO_PAGE_ID;
-use parking_lot::RwLock;
-use std::sync::Arc;
+use crate::wal::WalManager;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::RwLock;
 
 pub struct PageFlusher {
     buffer_mgr: Arc<RwLock<BufferMgr>>,
@@ -55,7 +55,7 @@ impl PageFlusher {
         }
 
         let buffer_len = {
-            let buf = self.buffer_mgr.read();
+            let buf = self.buffer_mgr.blocking_read();
             buf.buffer_size()
         };
 
@@ -64,7 +64,7 @@ impl PageFlusher {
         }
 
         let dirty_count = {
-            let buf = self.buffer_mgr.read();
+            let buf = self.buffer_mgr.blocking_read();
             buf.get_dirty_pages().len()
         };
 
@@ -80,7 +80,7 @@ impl PageFlusher {
 
     pub fn flush_now(&self) {
         let dirty_pages = {
-            let mut buf = self.buffer_mgr.write();
+            let mut buf = self.buffer_mgr.blocking_write();
             if let Err(e) = buf.flush_all() {
                 eprintln!("PageFlusher: flush_now failed: {}", e);
                 return;
