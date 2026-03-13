@@ -291,7 +291,7 @@ impl BTreePage {
             }
         } else {
             // Read keys and children
-            for i in 0..num_keys {
+            for _i in 0..num_keys {
                 // Key length
                 let key_len = u16::from_le_bytes([data[offset], data[offset + 1]]) as usize;
                 offset += 2;
@@ -406,7 +406,7 @@ impl BTreeIndex {
         max_key_size: usize,
         index_id: u64,
     ) -> Self {
-        let mut allocated_pages = vec![root_page_id];
+        let allocated_pages = vec![root_page_id];
         Self {
             root_page_id: if root_page_id == 0 { 1 } else { root_page_id },
             fill_factor,
@@ -696,9 +696,12 @@ impl BTreeIndex {
     }
 }
 
-pub fn create_root_page(buffer_mgr: &Arc<RwLock<BufferMgr>>, is_leaf: bool) -> IndexResult<PageId> {
+pub fn create_root_page(
+    buffer_mgr: &Arc<RwLock<BufferMgr>>,
+    _is_leaf: bool,
+) -> IndexResult<PageId> {
     let page_id = {
-        let buf = buffer_mgr.blocking_write();
+        let _buf = buffer_mgr.blocking_write();
         // Allocate a new page (next available)
         // For now, just return a new ID
         1

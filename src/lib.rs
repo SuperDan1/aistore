@@ -1,3 +1,8 @@
+#![deny(unused_variables)]
+#![deny(unused_mut)]
+#![deny(unused_imports)]
+#![deny(unused_assignments)]
+
 //! Aistore storage engine library
 
 // Re-export storage engine API

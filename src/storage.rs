@@ -285,6 +285,7 @@ impl StorageEngine {
         table: &str,
         values: Vec<Value>,
     ) -> StorageResult<RowId> {
+        #[allow(unused_variables)]
         let table_id = {
             let heap_table = self
                 .tables
@@ -345,6 +346,7 @@ impl StorageEngine {
     }
 
     /// Scan rows with transaction (acquires S lock)
+    #[allow(unused_variables)]
     pub fn scan_with_tx(
         &mut self,
         tx_id: TransactionId,
@@ -420,6 +422,7 @@ impl StorageEngine {
     }
 
     /// Update a row (without transaction)
+    #[allow(unused_variables, unused_mut)]
     pub fn update(&mut self, table: &str, row_id: RowId, values: Vec<Value>) -> StorageResult<()> {
         let tx_id = self.lock_mgr.begin();
 
@@ -478,6 +481,7 @@ impl StorageEngine {
     }
 
     /// Update a row with transaction (acquires X lock)
+    #[allow(unused_variables, unused_mut)]
     pub fn update_with_tx(
         &mut self,
         tx_id: TransactionId,
@@ -581,6 +585,7 @@ impl StorageEngine {
     }
 
     /// Delete a row (without transaction)
+    #[allow(unused_variables, unused_mut)]
     pub fn delete(&mut self, table: &str, row_id: RowId) -> StorageResult<()> {
         let tx_id = self.lock_mgr.begin();
 
@@ -640,6 +645,7 @@ impl StorageEngine {
     }
 
     /// Delete a row with transaction (acquires X lock)
+    #[allow(unused_variables, unused_mut)]
     pub fn delete_with_tx(
         &mut self,
         tx_id: TransactionId,

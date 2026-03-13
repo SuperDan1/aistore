@@ -925,7 +925,7 @@ mod tests {
     /// Test concurrent pin/unpin operations - checks for pin count leaks
     #[test]
     fn test_buffer_desc_concurrent_pin_unpin() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::atomic::AtomicUsize;
         use std::sync::Arc;
         use std::thread;
 
@@ -937,7 +937,7 @@ mod tests {
         let mut handles = Vec::new();
         for _ in 0..thread_count {
             let desc = Arc::clone(&desc);
-            let errors = Arc::clone(&error_count);
+            let _errors = Arc::clone(&error_count);
             handles.push(thread::spawn(move || {
                 for _ in 0..iterations {
                     desc.pin();
@@ -950,7 +950,6 @@ mod tests {
         }
 
         // Now unpin all in one thread
-        let pin_count = desc.pin_count();
         for _ in 0..(iterations * thread_count) {
             desc.unpin();
         }

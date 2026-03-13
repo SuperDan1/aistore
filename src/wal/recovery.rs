@@ -53,15 +53,14 @@ impl RecoveryManager {
             .map(|c| c.begin_lsn)
             .unwrap_or(LSN::invalid());
 
-        let mut replayed_records = 0;
         let trx_info_page_id = checkpoint.as_ref().map(|c| c.trx_info_page_id).unwrap_or(0);
 
-        if let Some(cp) = checkpoint {
+        let replayed_records = if let Some(cp) = checkpoint {
             let active_txs: HashSet<u64> = cp.active_transactions.iter().cloned().collect();
-            replayed_records = self.replay_from_lsn(cp.begin_lsn, &write_page, Some(&active_txs));
+            self.replay_from_lsn(cp.begin_lsn, &write_page, Some(&active_txs))
         } else {
-            replayed_records = self.replay_from_lsn(LSN::invalid(), &write_page, None);
-        }
+            self.replay_from_lsn(LSN::invalid(), &write_page, None)
+        };
 
         RecoveryResult {
             checkpoint_lsn,

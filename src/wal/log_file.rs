@@ -23,7 +23,7 @@ impl LogFile {
 
         vfs.create_dir(dir.to_str().unwrap())?;
 
-        let handle = vfs.open_file(path.to_str().unwrap())?;
+        let _handle = vfs.open_file(path.to_str().unwrap())?;
         let size = 0;
 
         let mut log_file = Self {
@@ -207,9 +207,7 @@ impl LogFileManager {
     /// Clean up old log files before checkpoint_lsn
     pub fn cleanup_old_logs(&self, checkpoint_lsn: LSN) -> VfsResult<usize> {
         let mut cleaned = 0;
-        let checkpoint_file = checkpoint_lsn.raw() / self.config.max_file_size;
         let current_lsn = *self.current_lsn.blocking_read();
-        let current_file = current_lsn / self.config.max_file_size;
 
         let mut files = self.files.blocking_write();
         let mut to_remove = Vec::new();

@@ -276,7 +276,7 @@ impl IndexManager {
     }
 
     pub fn drop_index(&mut self, index_id: u64) -> IndexResult<()> {
-        if let Some(meta) = self.indexes.remove(&index_id) {
+        if let Some(_meta) = self.indexes.remove(&index_id) {
             if let Some(btree) = self.btrees.remove(&index_id) {
                 for page_id in btree.allocated_pages() {
                     self.page_allocator.deallocate(*page_id);
